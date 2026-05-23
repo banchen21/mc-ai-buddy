@@ -15,10 +15,11 @@ class AgentManager {
   }
 
   /** 启动管理器 */
-  start(intervalMs = 1500) {
+  start(intervalMs) {
+    const ms = intervalMs ?? this.deps.config.agent?.tickInterval ?? 1500;
     this.running = true;
-    this.tickInterval = setInterval(() => this.tick(), intervalMs);
-    console.log(`[AgentManager] Started (tick=${intervalMs}ms, single agent mode)`);
+    this.tickInterval = setInterval(() => this.tick(), ms);
+    console.log(`[AgentManager] Started (tick=${ms}ms, single agent mode)`);
   }
 
   stop() {

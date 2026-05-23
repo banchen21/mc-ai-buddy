@@ -193,11 +193,9 @@ module.exports = {
       bot.pathfinder.setGoal(new goals.GoalNear(x, pos.y, z, 2));
       logger.action('move', 'wander', `${Math.round(x)},${Math.round(z)}`);
 
-      // 到达后自动停止
+      // 15 秒后自动停止漫游
       setTimeout(() => {
-        if (bot.pathfinder.goal) {
-          bot.pathfinder.setGoal(null);
-        }
+        try { bot.pathfinder?.setGoal(null); } catch {}
       }, 15000);
     },
 

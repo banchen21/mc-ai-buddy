@@ -28,8 +28,10 @@ class LLM {
     });
     this.model = config.model || 'deepseek-chat';
     this.useStrictTools = config.useStrictTools || false;
-    this.history = [];       // 对话历史
-    this.maxHistory = 16;    // 保留 16 条对话历史
+    this.maxTokens = config.maxTokens || 300;
+    this.temperature = config.temperature || 0.7;
+    this.history = [];
+    this.maxHistory = config.maxHistory || 16;
   }
 
   /** 记录对话历史 */
@@ -125,28 +127,21 @@ class LLM {
 - Don't repeat failed actions; try something different
 - Check your inventory and equipped tool before acting`;
 
-    const prompt = `📊 Perception Report:
+    const prompt = `📊 Perception:
 🩸 HP:${context.health}/20 | 🍖 Food:${context.food}
 📍 Pos:${context.position} | 🗡️ Holding:${context.equipped || '?'}
-🎒 Inventory:${context.inventory || 'empty'}
+🎒 Inv:${context.inventory || 'empty'}
 ⚠️ Missing:${context.gaps?.join(',') || 'none'}
-${context.underAttack ? `⚔️ UNDER ATTACK! Attacker:${context.lastAttacker || '?'} | Recent hits:${context.recentDamage || '?'} | Hits in 30s:${context.damageCount30s || 0}` : ''}
+${context.underAttack ? `⚔️ UNDER ATTACK! Attacker:${context.lastAttacker || '?'} | Hits/30s:${context.hits30s || 0}` : ''}
 
-🔍 Nearby (16 blocks):
-  Threats:${context.threats || 'safe'}
-  Animals:${context.animals || 'none'}
-  Players:${context.players || 'none'}
-  Drops:${context.drops || 'none'}
-  Ores:${context.ores || 'none'}
-  Trees:${context.trees || 'none'}
-  Facilities:${context.facilities || 'none'}
-  Dangers:${context.dangers || 'none'}
-  🧱 All blocks (${context.totalBlocks || 0} types): ${context.blockSummary || 'none'}
-
-🗺️ Far (20 blocks):${context.farEntities || 'empty'}
-🌍 World:${context.dayPhase || '?'} | ${context.isUnderground ? 'underground' : 'surface'} | ${context.biome || '?'}
-${context.lastAction ? `📋 Last action:${context.lastAction}` : ''}
-${lastResult ? `⚠️ Last result:${lastResult}` : ''}
+🔍 Entities: ${context.entities || 'none'}
+👤 Players:${context.players || 'none'}
+📦 Drops:${context.drops || 'none'}
+🧱 Blocks: ${context.blocks || 'empty'}
+🗺️ Far:${context.farEntities || 'none'}
+🌍 ${context.dayPhase || '?'} | ${context.isUnderground ? 'underground' : 'surface'} | ${context.biome || '?'}
+${context.lastAction ? `📋 Last:${context.lastAction}` : ''}
+${lastResult ? `⚠️ Result:${lastResult}` : ''}
 ${context.recentFacts ? `💭 Recent:${context.recentFacts}` : ''}
 ${context.longTermSummary ? `🧠 Memory:${context.longTermSummary}` : ''}`;
 
@@ -210,8 +205,8 @@ Nearby ores:${context.ores || 'none'} | Nearby trees:${context.trees || 'none'}`
         messages,
         tools: finalTools,
         tool_choice: 'auto',
-        temperature: 0.7,
-        max_tokens: 300,
+        temperature: this.temperature,
+        max_tokens: this.maxTokens,
       });
 
       const msg = response.choices[0].message;
@@ -246,8 +241,8 @@ Nearby ores:${context.ores || 'none'} | Nearby trees:${context.trees || 'none'}`
             messages,
             tools: this.useStrictTools ? tools.map(t => ({ ...t, function: { ...t.function, strict: true } })) : tools,
             tool_choice: 'auto',
-            temperature: 0.7,
-            max_tokens: 300,
+            temperature: this.temperature,
+            max_tokens: this.maxTokens,
           });
           const msg = response.choices[0].message;
           this.remember('user', prompt);

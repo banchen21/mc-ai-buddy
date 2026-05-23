@@ -8,7 +8,7 @@ class StatusIndicator {
     this.current = 'idle';
     this.startTime = 0;
     this.lastReport = 0;
-    this.reportInterval = 5000; // 每 5 秒报告一次
+    this.reportInterval = 5000;
     this._timer = null;
   }
 

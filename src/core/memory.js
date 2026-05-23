@@ -147,44 +147,35 @@ class Memory {
     const p = this.perception.scan(bot, this);
 
     return {
-      health: p.self.health,
+      // 自身
+      health: p.self.hp,
       food: p.self.food,
-      position: p.self.position,
-      equipped: p.self.equipped.hand,
-      inventory: p.self.inventory.summary,
+      position: p.self.pos,
+      equipped: p.self.holding,
+      inventory: p.self.inv,
       gaps: p.self.gaps,
 
+      // 伤害
       underAttack: p.self.underAttack,
-      lastAttacker: p.self.lastAttacker,
-      recentDamage: p.self.recentDamage,
-      damageCount30s: p.self.damageCount30s,
+      lastAttacker: p.self.attacker,
+      hits30s: p.self.hits30s,
 
-      threats: p.near.threats,
-      threatCount: p.near.threatCount,
-      animals: p.near.animals,
-      players: p.near.players,
-      drops: p.near.drops,
-      ores: p.near.ores,
-      trees: p.near.trees,
-      facilities: p.near.facilities,
-      dangers: p.near.dangers,
-      blockSummary: p.near.allBlocks,
-      totalBlocks: p.near.totalBlocks,
+      // 环境
+      entities: p.env.entities,
+      farEntities: p.env.farEntities,
+      players: p.env.player,
+      drops: p.env.drops,
+      blocks: p.env.blocks,
+      dayPhase: p.env.time,
+      isUnderground: p.env.underground,
+      biome: p.env.biome,
+      canSleep: p.env.canSleep,
+      isRaining: p.env.raining,
 
-      farEntities: p.far.entitySummary,
-      biome: p.far.biome,
-      hasInteresting: p.far.hasInteresting,
-
-      timeOfDay: p.world.timeOfDay,
-      dayPhase: p.world.dayPhase,
-      isDaytime: p.world.isDaytime,
-      isUnderground: p.world.isUnderground,
-      canSleep: p.world.canSleep,
-
+      // 任务
       lastAction: this.lastAction,
-      recentChat: p.task.chatHistory.map(c => c.content).join(' | '),
+      recentChat: p.task.recentChat,
       recentFacts: this.shortTermFacts.map(f => f.fact).join('; ') || null,
-
       longTermSummary: this._getLongTermSummary(),
     };
   }

@@ -6,17 +6,17 @@ const logger = require('../core/logger');
 const { AgentManager } = require('../core/agent-manager');
 const { StatusIndicator } = require('../core/status-indicator');
 
-let bot, deps, interval;
+let bot, deps;
 let allTools = [];
 let lastToolResult = '';
 let agentManager = null;
 let status = null;
-let emptyResponseCount = 0;   // 空响应计数器（防止死循环）
-const MAX_EMPTY_RESPONSES = 3;
-let tickRunning = false;      // 防止心跳重叠
-let chatRunning = false;      // 防止聊天处理和心跳重叠
-let lastChatTime = 0;         // 上次聊天时间（防 spam）
-const MIN_CHAT_INTERVAL = 2000; // 最小聊天间隔 2 秒
+let emptyResponseCount = 0;
+let MAX_EMPTY_RESPONSES = 3;
+let tickRunning = false;
+let chatRunning = false;
+let lastChatTime = 0;
+let MIN_CHAT_INTERVAL = 2000;
 
 // tool → 状态映射
 const TOOL_STATUS = {
@@ -36,6 +36,10 @@ module.exports = {
     deps = _deps;
     logger.attach(bot);
 
+    // 从配置读取常量
+    MAX_EMPTY_RESPONSES = deps.config.brain?.maxEmptyResponses ?? 3;
+    MIN_CHAT_INTERVAL = deps.config.brain?.minChatInterval ?? 2000;
+
     status = new StatusIndicator(bot);
 
     allTools = [];
@@ -49,26 +53,42 @@ module.exports = {
   },
 
   start() {
-    const hb = deps.config.heartbeat || { interval: 30 };
-
-    interval = setInterval(() => this.tick(), hb.interval * 1000);
+    // 先停止旧循环（防止重生后双重循环）
+    this.stop();
+    const hb = deps.config.heartbeat || { interval: 15 };
     agentManager.start(2000);
-    status.startReporting(8000);
+    status.startReporting(deps.config.status?.reportInterval ?? 8000);
 
-    logger.info('brain', `Heartbeat ${hb.interval}s | AgentManager 2s`);
+    this._autoLoop(hb.interval);
+    logger.info('brain', `Auto-loop ${hb.interval}s | AgentManager 2s`);
   },
 
   stop() {
-    clearInterval(interval);
+    this._stopped = true;
     agentManager.stop();
     status.stopReporting();
   },
 
+  /** 自驱动循环：空闲就工作 */
+  async _autoLoop(delaySec) {
+    this._stopped = false;
+    const loopId = Date.now();
+    while (!this._stopped) {
+      // 等待空闲：bot 在线、无 agent、无 tick 在跑、血量正常
+      if (bot?.entity && bot.health > 0 && !agentManager.hasAgent && !tickRunning) {
+        await this.tick();
+      }
+      // tick 执行完后等配置间隔再继续
+      await new Promise(r => setTimeout(r, Math.max(delaySec * 1000, 3000)));
+    }
+    console.log(`[Brain] Auto-loop ${loopId} stopped`);
+  },
+
   /** 心跳：自主决策 */
   async tick() {
-    if (!bot?.entity) return;
-    if (agentManager.hasAgent) return;  // 代理执行中，心跳跳过
-    if (tickRunning) return;  // 防止重叠调用导致 LLM history 污染
+    if (!bot?.entity || bot.health <= 0) return;
+    if (agentManager.hasAgent) return;
+    if (tickRunning) return;
     tickRunning = true;
 
     try {
@@ -76,15 +96,24 @@ module.exports = {
       const ctx = deps.memory.getContext(bot);
       const result = await deps.llm.decideWithTools(ctx, allTools, lastToolResult);
 
+      // LLM 调用期间可能死了，再次检查
+      if (!bot?.entity || bot.health <= 0) {
+        console.log('[Brain] Died during LLM call, discarding result');
+        return;
+      }
+
       if (result.reply) {
-        // 心跳自主决策不聊天，只记日志
         console.log(`[Brain] Auto thought: ${result.reply.substring(0, 80)}`);
       }
 
       if (result.tool_calls) {
         emptyResponseCount = 0;
         const results = [];
-        for (const tc of result.tool_calls) results.push(await this.executeToolCall(tc));
+        for (const tc of result.tool_calls) {
+          // 执行每个工具前也检查
+          if (!bot?.entity || bot.health <= 0) break;
+          results.push(await this.executeToolCall(tc));
+        }
         deps.llm.addToolResults(result.tool_calls, results);
         lastToolResult = this._formatResults(result.tool_calls, results);
       } else {

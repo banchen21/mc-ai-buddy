@@ -21,7 +21,7 @@ class SubAgent {
     this.status = 'idle';     // idle | running | done | failed
     this.result = null;
     this.steps = [];          // 执行步骤记录
-    this.maxSteps = 8;        // 最大步数（减少避免死循环）
+    this.maxSteps = deps.config.agent?.maxSteps ?? 8;
     this._ownHistory = [];    // 子代理独立的 LLM 历史，不和主 LLM 共享
 
     // 筛选该代理可用的 tools（空数组 = 使用全部工具）

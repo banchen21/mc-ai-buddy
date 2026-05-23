@@ -26,7 +26,7 @@ const PLUGINS = [
 // ===== 全局重连计数（跨 main() 调用持久化） =====
 let globalReconnectCount = 0;
 let reconnecting = false;
-const MAX_RECONNECT = 5;
+const MAX_RECONNECT = config.reconnect?.maxAttempts ?? 5;
 
 async function main() {
   const { host, port, username, version } = config.bot;
@@ -67,9 +67,6 @@ async function main() {
 
     // 启动所有插件
     for (const plugin of PLUGINS) plugin.start();
-
-    // 打招呼
-    setTimeout(() => bot.chat('嘿！我是你的AI伙伴~'), 1000);
   });
 
   // 聊天 → brain 统一处理
@@ -102,11 +99,28 @@ async function main() {
     }
   });
 
-  // 死亡
+  // 死亡 → 停止所有操作，记录长期记忆
   bot.on('death', () => {
     logger.info('bot', 'Died! Respawning...');
     memory.recordDeath(`at ${memory.perception.lastAttacker || 'unknown cause'}`);
     memory.learnLesson('death', `Died at ${Math.round(bot.entity?.position?.x || 0)},${Math.round(bot.entity?.position?.y || 0)},${Math.round(bot.entity?.position?.z || 0)} - be more careful`);
+
+    // 停止所有插件操作
+    for (const plugin of PLUGINS) {
+      try { plugin.stop?.(); } catch (e) { logger.error('plugin/stop', e); }
+    }
+    // 清空 LLM 历史，避免带着旧上下文继续
+    llm.history = [];
+    // 清除感知层状态
+    memory.perception.clearThreat();
+  });
+
+  // 重生后重新启动插件
+  bot.on('respawn', () => {
+    console.log('[MC AI Buddy] Respawned, restarting plugins...');
+    for (const plugin of PLUGINS) {
+      try { plugin.start?.(); } catch (e) { logger.error('plugin/start', e); }
+    }
   });
 
   bot.on('kicked', (reason) => {
@@ -131,8 +145,9 @@ async function main() {
     bot.removeAllListeners();
 
     const isDup = reasonStr.includes('duplicate_login');
-    // duplicate_login 需要更长的冷却时间，让服务端清理旧 session
-    const delay = isDup ? 30000 : 5000;
+    const delay = isDup
+      ? (config.reconnect?.duplicateLoginDelay ?? 30000)
+      : (config.reconnect?.normalDelay ?? 5000);
     console.log(`[MC AI Buddy] Reconnecting in ${delay/1000}s... (attempt ${globalReconnectCount}/${MAX_RECONNECT})`);
 
     // 先等 2 秒确保 socket 完全关闭，再等 delay 后重连
@@ -166,7 +181,7 @@ async function main() {
         console.log(`[MC AI Buddy] Max reconnect attempts (${MAX_RECONNECT}) reached. Giving up.`);
         process.exit(1);
       }
-      const delay = 5000;
+      const delay = config.reconnect?.normalDelay ?? 5000;
       console.log(`[MC AI Buddy] Connection lost, reconnecting in ${delay/1000}s... (attempt ${globalReconnectCount}/${MAX_RECONNECT})`);
       setTimeout(async () => {
         try { await main(); } catch (e) { logger.error('main/reconnect', e); }
