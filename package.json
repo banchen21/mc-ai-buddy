@@ -1,0 +1,18 @@
+{
+  "name": "mc-ai-buddy",
+  "version": "1.0.0",
+  "description": "AI Minecraft companion powered by Mineflayer + DeepSeek",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "mineflayer": "^4.23.0",
+    "mineflayer-auto-eat": "^3.3.0",
+    "mineflayer-collectblock": "^1.6.0",
+    "mineflayer-pathfinder": "^2.4.5",
+    "mineflayer-pvp": "^1.3.2",
+    "openai": "^4.73.0",
+    "vec3": "^0.1.8"
+  }
+}

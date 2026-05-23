@@ -1,0 +1,18 @@
+{
+  "bot": {
+    "username": "Copilot",
+    "host": "localhost",
+    "port": 25565,
+    "version": "1.20.1"
+  },
+  "deepseek": {
+    "apiKey": "sk-your-api-key-here",
+    "baseUrl": "https://api.deepseek.com/v1",
+    "betaBaseUrl": "https://api.deepseek.com/beta",
+    "model": "deepseek-chat",
+    "useStrictTools": false
+  },
+  "heartbeat": {
+    "interval": 15
+  }
+}
