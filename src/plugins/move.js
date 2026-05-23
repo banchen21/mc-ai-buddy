@@ -247,25 +247,22 @@ module.exports = {
         const item = bot.inventory.items().find(it => it.name === scaffoldItem.name);
         if (!item) break;
 
-        const pos = bot.entity.position.floored();
-        // 参考方块：脚下那一格
-        const refBlock = bot.blockAt(pos.offset(0, -1, 0));
-        if (!refBlock || refBlock.name === 'air') {
-          console.log('[Move] tower: no solid block below feet');
-          break;
-        }
-
         try {
           await bot.equip(item, 'hand');
-          // 把方块放在参考方块的上方 = 自己脚下
-          await bot.placeBlock(refBlock, new (require('vec3'))(0, 1, 0));
-          // 等方块放置完成
-          await new Promise(r => setTimeout(r, 200));
-          // 跳跃到新放的方块上
+
+          // 先跳起来，在空中看脚下放方块
           bot.setControlState('jump', true);
-          await new Promise(r => setTimeout(r, 200));
+          await new Promise(r => setTimeout(r, 150));
+
+          const pos = bot.entity.position.floored();
+          const belowBlock = bot.blockAt(pos.offset(0, -1, 0));
+          if (belowBlock && belowBlock.name !== 'air') {
+            await bot.lookAt(pos.offset(0, -1, 0), true);
+            await bot.placeBlock(belowBlock, new (require('vec3'))(0, 1, 0));
+          }
+
           bot.setControlState('jump', false);
-          await new Promise(r => setTimeout(r, 200));
+          await new Promise(r => setTimeout(r, 300));
         } catch (err) {
           logger.error('move/tower', err);
           break;

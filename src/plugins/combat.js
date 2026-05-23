@@ -144,8 +144,10 @@ module.exports = {
 
       let threat = attackerEntity;
       if (!threat) {
+        const harmless = /squid|bat|cod|salmon|tropical_fish|pufferfish|glow_squid|tadpole|axolotl|turtle|dolphin/;
         threat = bot.nearestEntity(e =>
           e.type === 'mob' &&
+          !harmless.test(e.name || '') &&
           bot.entity.position.distanceTo(e.position) < threatRadius
         );
       }

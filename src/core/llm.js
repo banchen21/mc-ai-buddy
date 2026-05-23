@@ -165,9 +165,9 @@ ${context.longTermSummary ? `🧠 Memory:${context.longTermSummary}` : ''}`;
 - Diamond Pickaxe (tier4): obsidian, ancient_debris
 
 **Rules:**
-- You MUST call at least one tool. Never return empty tool_calls.
-- If the player asks you to do something → call chat (brief reply) + the action tool
-- If it's just conversation → call chat
+- You MUST call at least one action tool (mine/chop/craft/attack/follow/etc). Never just chat.
+- If the player asks you to do something → call chat (brief reply) + the action tool (TWO tool_calls!)
+- If it's just conversation → call chat only
 - Check your current state before acting — the info is in the prompt`;
 
     const prompt = `Player says: "${message}"
@@ -186,8 +186,6 @@ Entities: ${context.entities || 'none'}`;
    */
   async _callWithTools(system, prompt, tools, toolChoice = 'auto') {
     try {
-      this._cleanOrphanToolCalls();
-
       const finalTools = this.useStrictTools
         ? tools.map(t => ({
             ...t,
