@@ -31,6 +31,7 @@ function makeMovements() {
   const moves = new Movements(bot, mcData);
   moves.canDig = true;
   moves.allowParkour = true;
+  moves.canSwim = true;
   return moves;
 }
 

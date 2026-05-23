@@ -12,11 +12,12 @@ let wanderInterval = null;
 function makeMovements() {
   const mcData = require('minecraft-data')(bot.version);
   const moves = new Movements(bot, mcData);
-  moves.canDig = true;          // 允许挖掘挡路方块
-  moves.allowParkour = true;    // 允许跑酷
-  moves.allow1by1towers = true; // 允许垫方块爬升
-  moves.digCost = 2;            // 降低挖掘成本，更愿意挖路
-  moves.placeCost = 2;          // 降低放置成本，更愿意垫脚
+  moves.canDig = true;
+  moves.allowParkour = true;
+  moves.allow1by1towers = true;
+  moves.canSwim = true;
+  moves.digCost = 2;
+  moves.placeCost = 2;
 
   // 实时检测背包中可用的垫脚方块
   const scaffoldItems = bot.inventory.items().filter(i =>

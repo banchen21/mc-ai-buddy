@@ -11,6 +11,7 @@ function makeMovements() {
   const mcData = require('minecraft-data')(bot.version);
   const moves = new Movements(bot, mcData);
   moves.canDig = false;
+  moves.canSwim = true;
   return moves;
 }
 

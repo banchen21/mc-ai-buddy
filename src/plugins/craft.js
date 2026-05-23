@@ -10,6 +10,7 @@ function makeMovements() {
   const mcData = require('minecraft-data')(bot.version);
   const moves = new Movements(bot, mcData);
   moves.canDig = false;
+  moves.canSwim = true;
   return moves;
 }
 
@@ -187,22 +188,36 @@ module.exports = {
 
     /** 睡觉 */
     async sleep() {
+      const timeOfDay = bot.time?.timeOfDay ?? (bot.time?.age ?? 0) % 24000;
+      const isNight = timeOfDay > 12540 && timeOfDay < 23460;
+      if (!isNight && !bot.isRaining && !bot.isThundering) {
+        return 'not_night';
+      }
+
       const mcData = require('minecraft-data')(bot.version);
-      const bedId = mcData.blocksByName.white_bed?.id
-        || Object.entries(mcData.blocksByName).find(([n]) => n.includes('bed'))?.[1]?.id;
+      // 匹配所有床（white_bed, red_bed 等）
+      const bedIds = Object.entries(mcData.blocksByName)
+        .filter(([n]) => n.includes('bed'))
+        .map(([, b]) => b.id);
+      if (!bedIds.length) return 'no_bed';
 
-      if (!bedId) { bot.chat('没有床...'); return false; }
-
-      const bed = bot.findBlock({ matching: bedId, maxDistance: 16 });
-      if (!bed) { bot.chat('附近没床'); return false; }
+      // 直接找最近的床方块
+      const bed = bot.findBlock({ matching: bedIds, maxDistance: 32 });
+      if (!bed) return 'no_bed';
 
       try {
+        const dist = bot.entity.position.distanceTo(bed.position);
+        if (dist > 3) {
+          bot.pathfinder.setMovements(makeMovements());
+          await bot.pathfinder.goto(new goals.GoalNear(bed.position.x, bed.position.y, bed.position.z, 2));
+          bot.pathfinder.setGoal(null);
+        }
+
         await bot.sleep(bed);
-        bot.chat('晚安！');
         logger.action('craft', 'sleep');
         return true;
-      } catch {
-        bot.chat('现在不能睡');
+      } catch (err) {
+        console.log(`[Craft] Sleep failed: ${err.message}`);
         return false;
       }
     },

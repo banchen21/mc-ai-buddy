@@ -110,7 +110,6 @@ module.exports = {
         emptyResponseCount = 0;
         const results = [];
         for (const tc of result.tool_calls) {
-          // 执行每个工具前也检查
           if (!bot?.entity || bot.health <= 0) break;
           results.push(await this.executeToolCall(tc));
         }
@@ -119,11 +118,14 @@ module.exports = {
       } else {
         emptyResponseCount++;
         if (emptyResponseCount >= MAX_EMPTY_RESPONSES) {
-          console.log('[Brain] Too many empty responses, clearing LLM history');
+          console.log('[Brain] Too many empty responses, forcing wander');
           deps.llm.history = [];
           emptyResponseCount = 0;
+          // 强制漫游打破死循环
+          try { await this.executeToolCall({ function: { name: 'wander', arguments: '{}' } }); } catch {}
+          lastToolResult = 'wander → forced';
         }
-        lastToolResult = '';
+        lastToolResult = lastToolResult || '';
       }
 
       logger.llm('decide', ctx.position, result);
@@ -156,15 +158,28 @@ module.exports = {
     try {
       status.set('thinking', `理解: "${message}"`);
       const ctx = deps.memory.getContext(bot);
-      const result = await deps.llm.understandWithTools(message, ctx, allTools);
+      let result = await deps.llm.understandWithTools(message, ctx, allTools);
 
-      // 有工具调用时，reply 只是 LLM 的思考过程，不 chat
-      // 只有纯对话（无 tool_calls）时才 chat reply
+      // 空响应 → 重试一次
+      if (!result.tool_calls && !result.reply) {
+        console.log('[Brain] Empty response, retrying...');
+        result = await deps.llm.understandWithTools(message, ctx, allTools);
+      }
+
+      // 还是空 → 强制回复
+      if (!result.tool_calls && !result.reply) {
+        bot.chat('嗯？');
+        return;
+      }
+
+      // 纯对话 → chat reply
       if (result.reply && !result.tool_calls) {
         bot.chat(result.reply);
         lastChatTime = Date.now();
+        return;
       }
 
+      // 有工具调用 → 执行
       if (result.tool_calls) {
         const results = [];
         for (const tc of result.tool_calls) results.push(await this.executeToolCall(tc));
@@ -181,15 +196,30 @@ module.exports = {
   _formatResults(toolCalls, results) {
     return toolCalls.map((tc, i) => {
       const r = results[i];
-      const s = r === true ? '✅' : r === false ? '❌' : r === 0 ? '⚠️0' : `${r}`;
-      return `${tc.function.name} → ${s}`;
+      const name = tc.function.name;
+      // 持续性操作标记为 running，避免 LLM 重复调用
+      const ongoing = ['follow', 'wander', 'goto'].includes(name);
+      if (ongoing) return `${name} → running`;
+      const s = r === true ? 'ok' : r === false ? 'fail' : typeof r === 'string' ? r.substring(0, 30) : `${r}`;
+      return `${name} → ${s}`;
     }).join('; ');
   },
 
   async executeToolCall(tc) {
     const name = tc.function.name;
     let args = {};
-    try { args = JSON.parse(tc.function.arguments || '{}'); } catch (e) { logger.error('brain/parseArgs', e); }
+    try {
+      args = JSON.parse(tc.function.arguments || '{}');
+    } catch (e) {
+      const raw = (tc.function.arguments || '{}').trim();
+      console.log(`[Brain] JSON parse failed, raw: ${raw.substring(0, 100)}`);
+      try {
+        // 修复尾部多余逗号
+        args = JSON.parse(raw.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']'));
+      } catch {
+        logger.error('brain/parseArgs', e);
+      }
+    }
 
     // 更新状态
     const stateName = TOOL_STATUS[name] || name;

@@ -35,9 +35,10 @@ class LLM {
   }
 
   /** 记录对话历史 */
-  remember(role, content, toolCalls) {
+  remember(role, content, toolCalls, reasoningContent) {
     const entry = { role, content };
     if (toolCalls) entry.tool_calls = toolCalls;
+    if (reasoningContent) entry.reasoning_content = reasoningContent;
     this.history.push(entry);
     this._trimHistory();
   }
@@ -124,8 +125,10 @@ class LLM {
 - Otherwise → wander and explore
 
 **Tips:**
+- Don't repeat the same action if it's already in progress (e.g. don't follow() again if already following)
 - Don't repeat failed actions; try something different
-- Check your inventory and equipped tool before acting`;
+- Check your inventory and equipped tool before acting
+- If nothing needs doing, you can return no tool_calls (just reply is fine)`;
 
     const prompt = `📊 Perception:
 🩸 HP:${context.health}/20 | 🍖 Food:${context.food}
@@ -162,31 +165,29 @@ ${context.longTermSummary ? `🧠 Memory:${context.longTermSummary}` : ''}`;
 - Diamond Pickaxe (tier4): obsidian, ancient_debris
 
 **Rules:**
-- Understand what the player wants, then call the right tool(s) to do it
-- If the player asks you to do something actionable → call chat (brief reply) + the action tool
-- If it's just conversation → only call chat
-- If you're unsure → chat a reply asking for clarification
+- You MUST call at least one tool. Never return empty tool_calls.
+- If the player asks you to do something → call chat (brief reply) + the action tool
+- If it's just conversation → call chat
 - Check your current state before acting — the info is in the prompt`;
 
     const prompt = `Player says: "${message}"
 
 Current state:
-Holding:${context.equipped || '?'} | Inventory:${context.inventory || 'empty'}
+Holding:${context.equipped || '?'} | Inv:${context.inventory || 'empty'}
 Missing:${context.gaps?.join(',') || 'none'}
-Nearby ores:${context.ores || 'none'} | Nearby trees:${context.trees || 'none'}`;
+Blocks: ${context.blocks || 'empty'}
+Entities: ${context.entities || 'none'}`;
 
-    return this._callWithTools(system, prompt, tools);
+    return this._callWithTools(system, prompt, tools, 'auto');
   }
 
   /**
    * 底层 Tool Calls 调用
    */
-  async _callWithTools(system, prompt, tools) {
+  async _callWithTools(system, prompt, tools, toolChoice = 'auto') {
     try {
-      // 清理孤立的 tool_calls
       this._cleanOrphanToolCalls();
 
-      // strict 模式：给每个 tool 注入 strict: true
       const finalTools = this.useStrictTools
         ? tools.map(t => ({
             ...t,
@@ -204,8 +205,7 @@ Nearby ores:${context.ores || 'none'} | Nearby trees:${context.trees || 'none'}`
         model: this.model,
         messages,
         tools: finalTools,
-        tool_choice: 'auto',
-        temperature: this.temperature,
+        tool_choice: toolChoice,
         max_tokens: this.maxTokens,
       });
 
@@ -213,13 +213,10 @@ Nearby ores:${context.ores || 'none'} | Nearby trees:${context.trees || 'none'}`
 
       console.log(`[LLM] Response: content="${(msg.content||'').substring(0,50)}", tool_calls=${msg.tool_calls?.length || 0}`);
 
-      // 记录历史
-      this.remember('user', prompt);
-      if (msg.tool_calls) {
-        this.remember('assistant', msg.content || '', msg.tool_calls);
-      } else {
-        this.remember('assistant', msg.content || '');
-      }
+      // 按 DeepSeek 文档：直接 push 整个 message（含 reasoning_content + tool_calls）
+      this.history.push({ role: 'user', content: prompt });
+      this.history.push(msg);
+      this._trimHistory();
 
       return {
         reply: msg.content || null,
@@ -227,7 +224,6 @@ Nearby ores:${context.ores || 'none'} | Nearby trees:${context.trees || 'none'}`
       };
     } catch (err) {
       logError(`[LLM Tools] ${err.message} status:${err.status}`);
-      // 400 错误通常是 history 污染 → 清空重试一次
       if (err.status === 400) {
         console.log('[LLM Tools] Clearing history and retrying...');
         this.history = [];
@@ -240,22 +236,21 @@ Nearby ores:${context.ores || 'none'} | Nearby trees:${context.trees || 'none'}`
             model: this.model,
             messages,
             tools: this.useStrictTools ? tools.map(t => ({ ...t, function: { ...t.function, strict: true } })) : tools,
-            tool_choice: 'auto',
-            temperature: this.temperature,
+            tool_choice: toolChoice,
             max_tokens: this.maxTokens,
           });
           const msg = response.choices[0].message;
+          const reasoning = msg.reasoning_content || null;
           this.remember('user', prompt);
-          if (msg.tool_calls) {
-            this.remember('assistant', msg.content || '', msg.tool_calls);
-          } else {
-            this.remember('assistant', msg.content || '');
-          }
+          this.history.push({ role: 'user', content: prompt });
+          this.history.push(msg);
           return { reply: msg.content || null, tool_calls: msg.tool_calls || null };
         } catch (retryErr) {
           logError(`[LLM Tools Retry] ${retryErr.message}`);
+          this.history = [];
         }
       }
+      // 出错时返回空，让 brain 处理
       return { reply: null, tool_calls: null };
     }
   }

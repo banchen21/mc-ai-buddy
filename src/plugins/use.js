@@ -42,6 +42,7 @@ function makeMovements() {
   const mcData = require('minecraft-data')(bot.version);
   const moves = new Movements(bot, mcData);
   moves.canDig = false;
+  moves.canSwim = true;
   return moves;
 }
 
@@ -269,12 +270,12 @@ module.exports = {
       const chest = findBlock('chest') || findBlock('trapped_chest') || findBlock('barrel');
       if (!chest) {
         console.log('[Use] No chest nearby');
-        return false;
+        return 'no_chest';
       }
 
       if (!(await walkToBlock(chest))) {
         console.log('[Use] Cannot reach chest');
-        return false;
+        return 'unreachable';
       }
 
       try {
@@ -282,33 +283,30 @@ module.exports = {
 
         if (action === 'view') {
           const items = c.containerItems().map(i => `${i.name}×${i.count}`).join(', ');
-          console.log(`[Use] Chest: ${items || 'empty'}`);
           c.close();
-          return true;
+          return items || 'empty';
         }
 
         if (action === 'deposit') {
           const item = bot.inventory.items().find(i =>
             i.name === itemName || i.name.includes(itemName)
           );
-          if (!item) { console.log(`[Use] No ${itemName} to deposit`); c.close(); return false; }
+          if (!item) { c.close(); return 'no_item'; }
           const n = count ? Math.min(count, item.count) : item.count;
           await c.deposit(item.type, null, n);
-          console.log(`[Use] Deposited ${n}x ${item.name}`);
           c.close();
-          return true;
+          return `deposited ${n}x ${item.name}`;
         }
 
         if (action === 'withdraw') {
           const item = c.containerItems().find(i =>
             i.name === itemName || i.name.includes(itemName)
           );
-          if (!item) { console.log(`[Use] No ${itemName} in chest`); c.close(); return false; }
+          if (!item) { c.close(); return 'not_found'; }
           const n = count ? Math.min(count, item.count) : item.count;
           await c.withdraw(item.type, null, n);
-          console.log(`[Use] Withdrew ${n}x ${item.name}`);
           c.close();
-          return true;
+          return `withdrew ${n}x ${item.name}`;
         }
 
         c.close();

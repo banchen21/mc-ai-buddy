@@ -143,53 +143,64 @@ class Perception {
     };
   }
 
-  /** 快速方块扫描：64 格范围，只找关键类型 */
+  /** 快速方块扫描：64 格范围，含最近距离 */
   _scanBlocks(bot) {
     const parts = [];
+    const myPos = bot.entity.position;
     try {
       const mcData = require('minecraft-data')(bot.version);
-      const R = 64; // 4 个区块
+      const R = 64;
 
-      // 原木
       const logIds = Object.entries(mcData.blocksByName)
         .filter(([n]) => n.includes('log') && !n.includes('stripped'))
         .map(([, b]) => b.id);
       if (logIds.length) {
         const logs = bot.findBlocks({ matching: logIds, maxDistance: R, count: 50 });
-        if (logs.length) parts.push(`log:${logs.length}`);
+        if (logs.length) {
+          const nearest = Math.min(...logs.map(p => myPos.distanceTo(p)));
+          parts.push(`log:${logs.length}(最近${Math.round(nearest)}m)`);
+        }
       }
 
-      // 矿石
       const oreIds = Object.entries(mcData.blocksByName)
         .filter(([n]) => ORE_PATTERN.test(n)).map(([, b]) => b.id);
       if (oreIds.length) {
         const ores = bot.findBlocks({ matching: oreIds, maxDistance: R, count: 50 });
         if (ores.length) {
-          const oc = {};
-          for (const op of ores.slice(0, 30)) { const b = bot.blockAt(op); if (b) oc[b.name] = (oc[b.name] || 0) + 1; }
+          const oc = {}; let nearestOre = Infinity;
+          for (const op of ores.slice(0, 30)) {
+            const b = bot.blockAt(op); if (!b) continue;
+            oc[b.name] = (oc[b.name] || 0) + 1;
+            nearestOre = Math.min(nearestOre, myPos.distanceTo(op));
+          }
           const os = Object.entries(oc).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([n, c]) => `${n}×${c}`).join(',');
-          if (os) parts.push(`ores:${os}`);
+          if (os) parts.push(`ores(${Math.round(nearestOre)}m):${os}`);
         }
       }
 
-      // 功能方块
       const valIds = Object.entries(mcData.blocksByName)
         .filter(([n]) => VALUABLE.test(n)).map(([, b]) => b.id);
       if (valIds.length) {
         const val = bot.findBlocks({ matching: valIds, maxDistance: R, count: 20 });
         if (val.length) {
-          const vc = {};
-          for (const vp of val.slice(0, 15)) { const b = bot.blockAt(vp); if (b) vc[b.name] = (vc[b.name] || 0) + 1; }
-          parts.push('facilities:' + Object.entries(vc).map(([n, c]) => `${n}×${c}`).join(','));
+          const vc = {}; let nearestVal = Infinity;
+          for (const vp of val.slice(0, 15)) {
+            const b = bot.blockAt(vp); if (!b) continue;
+            vc[b.name] = (vc[b.name] || 0) + 1;
+            nearestVal = Math.min(nearestVal, myPos.distanceTo(vp));
+          }
+          parts.push(`facilities(${Math.round(nearestVal)}m):` + Object.entries(vc).map(([n, c]) => `${n}×${c}`).join(','));
         }
       }
 
-      // 危险
       const dangerIds = Object.entries(mcData.blocksByName)
         .filter(([n]) => DANGER.test(n)).map(([, b]) => b.id);
       if (dangerIds.length) {
         const dangers = bot.findBlocks({ matching: dangerIds, maxDistance: R, count: 10 });
-        if (dangers.length) parts.push(`danger:${dangers.length}`);
+        if (dangers.length) {
+          const nearest = Math.min(...dangers.map(p => myPos.distanceTo(p)));
+          parts.push(`danger:${dangers.length}(最近${Math.round(nearest)}m)`);
+        }
       }
     } catch {}
     return parts.join(' | ') || 'empty';
