@@ -96,6 +96,48 @@ class QueryModule {
           parameters: { type: 'object', properties: {}, required: [] },
         },
       },
+      {
+        type: 'function',
+        function: {
+          name: 'get_chest',
+          description: '查询附近箱子里有什么物品（普通箱子、陷阱箱）',
+          parameters: {
+            type: 'object',
+            properties: {
+              maxDistance: { type: 'number', description: '最大搜索距离，默认 8' },
+            },
+            required: [],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'get_furnace',
+          description: '查询附近熔炉的烧炼状态（输入、燃料、输出）',
+          parameters: {
+            type: 'object',
+            properties: {
+              maxDistance: { type: 'number', description: '最大搜索距离，默认 8' },
+            },
+            required: [],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'get_container',
+          description: '查询附近任意容器（末影箱、木桶、漏斗、发射器、投掷器、潜影盒等）',
+          parameters: {
+            type: 'object',
+            properties: {
+              maxDistance: { type: 'number', description: '最大搜索距离，默认 8' },
+            },
+            required: [],
+          },
+        },
+      },
     ];
   }
 
@@ -112,6 +154,9 @@ class QueryModule {
       get_block: (p) => this._getBlock(p),
       get_surrounding_blocks: () => this._surroundingBlocks(),
       get_time: () => this._getTime(),
+      get_chest: (p) => this._getChest(p),
+      get_furnace: (p) => this._getFurnace(p),
+      get_container: (p) => this._getContainer(p),
     };
   }
 
@@ -250,6 +295,120 @@ class QueryModule {
     let period = '白天';
     if (hour > 18 || hour < 6) period = '夜晚';
     return `${period} ${hour}:00 | ${weather}`;
+  }
+
+  // ===== 容器查询 =====
+
+  /** 获取 mcData */
+  _mcData() {
+    return require('minecraft-data')(this.bot.version);
+  }
+
+  /** 查找附近指定类型的方块 */
+  _findNearbyBlocks(blockNames, maxDistance = 8) {
+    const mcData = this._mcData();
+    const ids = [];
+    for (const name of blockNames) {
+      const block = mcData.blocksByName[name];
+      if (block) ids.push(block.id);
+    }
+    if (ids.length === 0) return [];
+    return this.bot.findBlocks({ matching: ids, maxDistance, count: 5 });
+  }
+
+  /** 格式化容器物品列表 */
+  _formatItems(items) {
+    if (!items || items.length === 0) return '空';
+    const counts = {};
+    for (const item of items) {
+      const name = this._displayName(item);
+      counts[name] = (counts[name] || 0) + item.count;
+    }
+    return Object.entries(counts)
+      .map(([k, v]) => `${k} x${v}`)
+      .join(', ');
+  }
+
+  /** 查询箱子（普通箱子 + 陷阱箱） */
+  async _getChest({ maxDistance = 8 } = {}) {
+    const positions = this._findNearbyBlocks(['chest', 'trapped_chest'], maxDistance);
+    if (positions.length === 0) return `附近 ${maxDistance} 格内没有箱子`;
+
+    const results = [];
+    for (const pos of positions) {
+      const block = this.bot.blockAt(pos);
+      if (!block) continue;
+      try {
+        const chest = await this.bot.openChest(block);
+        const items = this._formatItems(chest.containerItems());
+        results.push(`${block.name}(${pos.x},${pos.y},${pos.z}): ${items}`);
+        await chest.close();
+      } catch (err) {
+        results.push(`${block.name}(${pos.x},${pos.y},${pos.z}): 无法打开 (${err.message})`);
+      }
+    }
+    return results.join('\n');
+  }
+
+  /** 查询熔炉（熔炉 + 高炉 + 烟熏炉） */
+  async _getFurnace({ maxDistance = 8 } = {}) {
+    const positions = this._findNearbyBlocks(['furnace', 'blast_furnace', 'smoker'], maxDistance);
+    if (positions.length === 0) return `附近 ${maxDistance} 格内没有熔炉`;
+
+    const results = [];
+    for (const pos of positions) {
+      const block = this.bot.blockAt(pos);
+      if (!block) continue;
+      try {
+        const furnace = await this.bot.openFurnace(block);
+        const input = furnace.inputItem() ? `${this._displayName(furnace.inputItem())} x${furnace.inputItem().count}` : '空';
+        const fuel = furnace.fuelItem() ? `${this._displayName(furnace.fuelItem())} x${furnace.fuelItem().count}` : '空';
+        const output = furnace.outputItem() ? `${this._displayName(furnace.outputItem())} x${furnace.outputItem().count}` : '空';
+        const fuelLeft = furnace.fuel ?? 0;
+        const progress = furnace.progress ?? 0;
+        results.push(`${block.name}(${pos.x},${pos.y},${pos.z}): 输入[${input}] 燃料[${fuel}](${Math.round(fuelLeft * 100)}%) 输出[${output}] 进度${Math.round(progress * 100)}%`);
+        await furnace.close();
+      } catch (err) {
+        results.push(`${block.name}(${pos.x},${pos.y},${pos.z}): 无法打开 (${err.message})`);
+      }
+    }
+    return results.join('\n');
+  }
+
+  /** 查询其他容器（末影箱、木桶、漏斗、发射器、投掷器、潜影盒） */
+  async _getContainer({ maxDistance = 8 } = {}) {
+    const containerBlocks = [
+      'ender_chest', 'barrel', 'hopper', 'dispenser', 'dropper',
+      'shulker_box', 'white_shulker_box', 'orange_shulker_box', 'magenta_shulker_box',
+      'light_blue_shulker_box', 'yellow_shulker_box', 'lime_shulker_box',
+      'pink_shulker_box', 'gray_shulker_box', 'light_gray_shulker_box',
+      'cyan_shulker_box', 'purple_shulker_box', 'blue_shulker_box',
+      'brown_shulker_box', 'green_shulker_box', 'red_shulker_box', 'black_shulker_box',
+    ];
+    const positions = this._findNearbyBlocks(containerBlocks, maxDistance);
+    if (positions.length === 0) return `附近 ${maxDistance} 格内没有其他容器`;
+
+    const results = [];
+    for (const pos of positions) {
+      const block = this.bot.blockAt(pos);
+      if (!block) continue;
+
+      // 末影箱无法通过 API 打开，只能告知位置
+      if (block.name === 'ender_chest') {
+        results.push(`末影箱(${pos.x},${pos.y},${pos.z}): 需要玩家自行打开`);
+        continue;
+      }
+
+      try {
+        const container = await this.bot.openContainer(block);
+        const items = this._formatItems(container.containerItems());
+        results.push(`${block.name}(${pos.x},${pos.y},${pos.z}): ${items}`);
+        await container.close();
+      } catch (err) {
+        results.push(`${block.name}(${pos.x},${pos.y},${pos.z}): 无法打开 (${err.message})`);
+      }
+    }
+    return results.join('\n');
   }
 
   /** 解析物品附魔 */

@@ -29,6 +29,13 @@ class MessageModule {
 
     this.bot.on('chat', (username, message) => {
       if (username === this.bot.username) return;
+
+      // 忽略空消息
+      if (!message || !message.trim()) return;
+
+      // 忽略以 / 开头的指令
+      if (message.startsWith('/')) return;
+
       this._enqueue(username, message);
     });
   }

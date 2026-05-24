@@ -15,6 +15,7 @@ const { QueryModule } = require('./src/tool_modules/query/query');
 const { MoveModule } = require('./src/tool_modules/action/move');
 const { InteractModule } = require('./src/tool_modules/action/interact');
 const { CraftModule } = require('./src/tool_modules/action/craft');
+const { PassiveModule } = require('./src/tool_modules/passive/passive');
 
 // ===== 全局状态 =====
 let globalReconnectCount = 0;
@@ -66,7 +67,7 @@ async function main() {
 
   // 注册工具到 Agent
   agent.registerModule(new QueryModule(bot));
-  agent.registerModule(new MoveModule(bot));
+  agent.registerModule(new MoveModule(bot, deps));
   agent.registerModule(new InteractModule(bot));
   agent.registerModule(new CraftModule(bot));
 
@@ -78,28 +79,137 @@ async function main() {
     messageModule.send(msg);
   };
 
+  // ===== 初始化被动模块（事件驱动，不经过 LLM） =====
+  const passiveModule = new PassiveModule(bot, deps);
+  passiveModule.init();
+  deps.passiveModule = passiveModule;
+
   // 处理器链：action 统一处理（工具调用 + 纯聊天）
   messageModule.use(async (username, message) => {
-    return actionModule.handleCommand(username, message);
+    // 玩家发消息时暂停自主决策
+    if (autoDecisionTimer) {
+      clearTimeout(autoDecisionTimer);
+      autoDecisionTimer = null;
+    }
+    const result = await actionModule.handleCommand(username, message);
+    // 处理完后延迟重启自主决策
+    if (config.autoDecision?.enabled && !autoDecisionRunning) {
+      autoDecisionTimer = setTimeout(autoDecisionLoop, 10000);
+    }
+    return result;
   });
+
+  // ===== 自主决策循环 =====
+  let autoDecisionRunning = false;
+  let autoDecisionTimer = null;
+
+  async function autoDecisionLoop() {
+    if (!config.autoDecision?.enabled) return;
+    if (autoDecisionRunning) return;
+
+    // 检查是否有活跃的 pathfinder 目标（跟随中等）
+    const hasActiveGoal = bot.pathfinder?.goal && !bot.pathfinder?.goal?.reached;
+
+    // 只在空闲时启动自主决策
+    if (hasActiveGoal) {
+      autoDecisionTimer = setTimeout(autoDecisionLoop, 5000);
+      return;
+    }
+
+    autoDecisionRunning = true;
+    try {
+      console.log('[Auto] 🤔 自主决策：思考下一步...');
+      const result = await agent.handle('system', '你现在可以自主决定做什么。根据当前状态（位置、背包、周围环境、血量、时间等），决定下一步行动。如果需要查询状态，使用查询工具。');
+      if (result?.reply) {
+        console.log(`[Auto] 💬 ${result.reply}`);
+      }
+      // 清理自主决策产生的 history（不污染对话记忆）
+      agent.llm.stripToolHistory();
+    } catch (err) {
+      console.log(`[Auto] ❌ ${err.message}`);
+    } finally {
+      autoDecisionRunning = false;
+      // 完成后等待一段时间再检查
+      autoDecisionTimer = setTimeout(autoDecisionLoop, 8000);
+    }
+  }
 
   // ===== 事件路由 =====
 
   bot.once('spawn', () => {
     console.log(`[MC AI Buddy] Spawned at ${Math.round(bot.entity.position.x)},${Math.round(bot.entity.position.y)},${Math.round(bot.entity.position.z)}`);
+
+    // 初始化 Pathfinder Movements（spawn 后 bot.pathfinder 才可用）
+    const mcData = require('minecraft-data')(bot.version);
+    const movements = new pathfinder.Movements(bot, mcData);
+    bot.pathfinder.setMovements(movements);
+    deps.movements = movements;
+
     globalReconnectCount = 0;
+
+    // 延迟启动自主决策，等初始化完成
+    setTimeout(() => {
+      if (config.autoDecision?.enabled) {
+        console.log('[Auto] 🧠 自主决策模式已启动');
+        autoDecisionLoop();
+      }
+    }, 3000);
   });
 
   // 死亡
   bot.on('death', () => {
     const pos = bot.entity?.position;
     const loc = pos ? `${Math.round(pos.x)},${Math.round(pos.y)},${Math.round(pos.z)}` : '?';
-    console.log(`[MC AI Buddy] 💀 Died at ${loc}`);
+
+    // 收集背包信息
+    const items = bot.inventory?.items() || [];
+    const invSummary = items.length > 0
+      ? items.slice(0, 10).map(i => `${i.name} x${i.count}`).join(', ')
+      : '空背包';
+    const totalItems = items.length;
+
+    // 收集装备信息
+    const held = bot.heldItem ? `${bot.heldItem.name} x${bot.heldItem.count}` : '空手';
+
+    // 获取击杀者（来自 combat 被动模块追踪的最后攻击者）
+    const attacker = deps.passiveModule?._ctx?.lastAttacker;
+    let killerInfo = '';
+    if (attacker) {
+      const aPos = attacker.position;
+      const aLoc = aPos ? `(${Math.round(aPos.x)},${Math.round(aPos.y)},${Math.round(aPos.z)})` : '';
+      const prefix = attacker.isPlayer ? '玩家 ' : '';
+      killerInfo = `，击杀者: ${prefix}${attacker.name}${aLoc ? ` ${aLoc}` : ''}`;
+    }
+
+    console.log(`[MC AI Buddy] 💀 Died at ${loc}${killerInfo}`);
+
+    // 注入事件到 LLM 记忆
+    if (agent) {
+      agent.injectEvent(
+        `bot 已死亡！死亡位置: (${loc})` +
+        `死亡后物品会掉落，需要尽快回去捡。`
+      );
+    }
+
+    // 记录到记忆
+    if (memory) {
+      memory.remember(`[死亡] 位置: (${loc})`);
+      memory.incStat('deaths');
+    }
   });
 
   // 重生
   bot.on('respawn', () => {
-    console.log('[MC AI Buddy] 🔄 Respawned');
+    const pos = bot.entity?.position;
+    const loc = pos ? `${Math.round(pos.x)},${Math.round(pos.y)},${Math.round(pos.z)}` : '?';
+    console.log(`[MC AI Buddy] 🔄 Respawned at ${loc}`);
+
+    if (agent) {
+      agent.injectEvent(`bot 已重生，当前位置: (${loc})。背包已清空，需要捡回死亡掉落的物品。`);
+    }
+    if (memory) {
+      memory.remember(`[重生] 位置: (${loc})`);
+    }
   });
 
   // 踢出/断线

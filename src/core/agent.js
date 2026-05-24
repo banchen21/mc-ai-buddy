@@ -80,6 +80,29 @@ class Agent {
   // ===== 主入口 =====
 
   /**
+   * 被动模块注入事件 — 将游戏事件写入 LLM history
+   * 让 LLM 在后续对话中感知到已发生的被动事件
+   * @param {string} eventSummary — 事件摘要，如 "[系统] 被僵尸攻击，已自动逃跑"
+   */
+  injectEvent(eventSummary) {
+    // 作为 system 角色注入，不影响 user/assistant 对话流
+    this.llm.history.push({
+      role: "user",
+      content: `[系统通知] ${eventSummary}`,
+      name: "system",
+    });
+    // 追加一个空的 assistant 确认，保持对话结构
+    this.llm.history.push({
+      role: "assistant",
+      content: "（已自动处理）",
+    });
+    this.llm._trimHistory();
+    if (this.llm._onHistoryChange) {
+      this.llm._onHistoryChange(this.llm.history);
+    }
+  }
+
+  /**
    * 处理用户消息
    * @param {string} username
    * @param {string} message

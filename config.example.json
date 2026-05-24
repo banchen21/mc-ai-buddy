@@ -15,27 +15,16 @@
     "temperature": 0.7,
     "maxHistory": 16
   },
-  "heartbeat": {
-    "interval": 15
-  },
-  "agent": {
-    "maxSteps": 8,
-    "tickInterval": 1500
-  },
-  "combat": {
-    "threatRadius": 16,
-    "dodgeHpThreshold": 10
+  "autoDecision": {
+    "enabled": true,
+    "passive": true,
+    "combat": true,
+    "survival": true,
+    "awareness": true
   },
   "reconnect": {
     "maxAttempts": 5,
     "duplicateLoginDelay": 30000,
     "normalDelay": 5000
-  },
-  "brain": {
-    "maxEmptyResponses": 3,
-    "minChatInterval": 2000
-  },
-  "status": {
-    "reportInterval": 5000
   }
 }

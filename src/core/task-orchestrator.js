@@ -75,7 +75,7 @@ class TaskOrchestrator {
     const lastMsg = messages[messages.length - 1];
     const label = lastMsg?.content?.substring(0, 20) || "";
     console.log(
-      `[LLM] "${label}" → "${reply.substring(0, 30)}"` +
+      `[LLM] "${label}" → "${(reply || '').substring(0, 30)}"` +
         tcDetail +
         ` | 💾 cache:${hit}/${total} (${hitRate}%)`,
     );
@@ -141,9 +141,10 @@ class TaskOrchestrator {
         .join(", ");
       console.log(`[Orch] 第${round}轮 → ${tcNames}`);
 
-      // 思考过程（仅在 thinkingMode 非 disabled 时发送）
-      if (result.rawMessage?.reasoning_content && this.llm.thinkingMode !== "disabled" && this.onChat) {
-        this.onChat(`[思考] ${result.rawMessage.reasoning_content}`);
+      // 思考过程：仅控制台彩色输出，不发送到游戏（避免非法字符踢出）
+      if (result.rawMessage?.reasoning_content) {
+        const thinking = result.rawMessage.reasoning_content;
+        console.log(`\x1b[35m[思考]${thinking}\x1b[0m`);
       }
 
       // 如果 LLM 同时返回了文本回复，收集
@@ -231,7 +232,7 @@ class TaskOrchestrator {
     }
 
     // 过滤残留标签
-    reply = reply.substring(0, 256).trim();
+    reply = (reply || '').substring(0, 256).trim();
 
     console.log(
       `[Orch] ✅ 完成 ${round}轮/${allResults.length}动作 → "${reply}"`,
