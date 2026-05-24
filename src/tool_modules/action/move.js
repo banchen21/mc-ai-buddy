@@ -201,6 +201,13 @@ class MoveModule {
     const conflict = this._checkDodgeConflict();
     if (conflict) return conflict;
 
+    // 参数校验
+    if (x === undefined || y === undefined || z === undefined ||
+        typeof x !== 'number' || typeof y !== 'number' || typeof z !== 'number' ||
+        !isFinite(x) || !isFinite(y) || !isFinite(z)) {
+      return '请提供有效的 x, y, z 坐标';
+    }
+
     // 覆盖 follow 时清除视角锁定
     this._clearLookAt();
 
@@ -333,8 +340,12 @@ class MoveModule {
       return `找不到玩家 ${player}`;
     }
     if (x !== undefined && y !== undefined && z !== undefined) {
+      if (typeof x !== 'number' || typeof y !== 'number' || typeof z !== 'number' ||
+          !isFinite(x) || !isFinite(y) || !isFinite(z)) {
+        return '请提供有效的 x, y, z 坐标';
+      }
       await this.bot.lookAt(new Vec3(x, y, z));
-      return `看向 ${x},${y},${z}`;
+      return `看向 ${Math.round(x)},${Math.round(y)},${Math.round(z)}`;
     }
     return '请指定坐标或玩家';
   }
@@ -408,6 +419,7 @@ class MoveModule {
       await this.bot.sleep(bed);
       return '正在睡觉';
     } catch (err) {
+      if (err.message === 'already sleep') return '已经在睡觉了';
       return `无法睡觉: ${err.message}`;
     }
   }

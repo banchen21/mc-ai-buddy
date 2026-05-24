@@ -109,7 +109,7 @@ class LLM {
       this.history.push(msg);
       this._trimHistory();
 
-      // 自动保存到 memory
+      // 自动保存到 journal
       if (this._onHistoryChange) this._onHistoryChange(this.history);
 
       // KV Cache 日志

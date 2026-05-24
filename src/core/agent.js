@@ -87,7 +87,7 @@ class Agent {
   injectEvent(eventSummary) {
     // 作为 system 角色注入，不影响 user/assistant 对话流
     this.llm.history.push({
-      role: "user",
+      role: "system",
       content: `[系统通知] ${eventSummary}`,
       name: "system",
     });

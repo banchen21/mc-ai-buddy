@@ -28,11 +28,10 @@ class AwarenessPassive {
 
       if (isNight && wasDay) {
         wasDay = false;
-        this.ctx.say('🌙 天黑了，小心怪物！');
-        this.ctx.injectEvent('天黑了，夜晚来临');
+        this.ctx.injectEvent('天亮了，夜晚来临');
       } else if (!isNight && !wasDay) {
         wasDay = true;
-        this.ctx.injectEvent('天亮了');
+        this.ctx.injectEvent('天黑了');
       }
     });
   }

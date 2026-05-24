@@ -18,7 +18,7 @@ const { AwarenessPassive } = require('./awareness');
 class PassiveModule {
   constructor(bot, deps) {
     this.bot = bot;
-    this.memory = deps.memory;
+    this.memory = deps.journal;
     this.messageModule = deps.messageModule;
     this.agent = deps.agent;
     this.config = deps.config;

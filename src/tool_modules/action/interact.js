@@ -447,7 +447,7 @@ class InteractModule {
     await this.bot.lookAt(block.position.offset(0.5, 0.5, 0.5));
     try {
       await this.bot.dig(block);
-      return `挖掘了 ${block.displayName || block.name}`;
+      return `挖掘了 ${block.displayName || block.name}，请拾取掉落物`;
     } catch (err) {
       return `挖掘失败: ${err.message}`;
     }

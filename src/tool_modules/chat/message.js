@@ -11,7 +11,7 @@ class MessageModule {
   constructor(bot, deps) {
     this.bot = bot;
     this.llm = deps.llm;
-    this.memory = deps.memory;
+    this.memory = deps.journal;
     this.config = deps.config;
     this._queue = [];
     this._processing = false;

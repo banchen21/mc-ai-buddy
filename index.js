@@ -9,7 +9,8 @@ const { LLM } = require('./src/core/llm');
 const { Agent } = require('./src/core/agent');
 const logger = require('./src/core/logger');
 const { MessageModule } = require('./src/tool_modules/chat/message');
-const { Memory } = require('./src/tool_modules/chat/memory');
+const { Journal } = require('./src/tool_modules/chat/journal');
+const { MemoryModule } = require('./src/tool_modules/chat/memory');
 const { ActionModule } = require('./src/tool_modules/action/action');
 const { QueryModule } = require('./src/tool_modules/query/query');
 const { MoveModule } = require('./src/tool_modules/action/move');
@@ -23,7 +24,7 @@ let reconnecting = false;
 const MAX_RECONNECT = config.reconnect?.maxAttempts ?? 5;
 
 // ===== 核心模块引用 =====
-let llm, agent, messageModule, memory, actionModule;
+let llm, agent, messageModule, journal, actionModule;
 
 async function main() {
   const { host, port, username, version } = config.bot;
@@ -47,15 +48,15 @@ async function main() {
 
   const deps = { llm, agent, config };
 
-  // ===== 初始化记忆模块 =====
-  memory = new Memory(bot, deps);
-  memory.init();
-  deps.memory = memory;
+  // ===== 初始化日志记忆模块 =====
+  journal = new Journal(bot, deps);
+  journal.init();
+  deps.journal = journal;
 
-  // 恢复 LLM 对话历史（多轮对话记忆）
-  llm.history = memory.loadHistory();
+  // 恢复 LLM 对话历史
+  llm.history = journal.loadHistory();
   // 每次 LLM 调用后自动保存历史
-  llm._onHistoryChange = (history) => memory.saveHistory(history);
+  llm._onHistoryChange = (history) => journal.saveHistory(history);
 
   // ===== 初始化消息模块 =====
   messageModule = new MessageModule(bot, deps);
@@ -66,10 +67,13 @@ async function main() {
   actionModule = new ActionModule(bot, deps);
 
   // 注册工具到 Agent
-  agent.registerModule(new QueryModule(bot));
+  agent.registerModule(new QueryModule(bot, deps));
   agent.registerModule(new MoveModule(bot, deps));
   agent.registerModule(new InteractModule(bot));
   agent.registerModule(new CraftModule(bot));
+  const memoryModule = new MemoryModule(bot, deps);
+  memoryModule.init();
+  agent.registerModule(memoryModule);
 
   // 注入人格到 Agent
   agent.setPersona(messageModule._persona);
@@ -119,9 +123,9 @@ async function main() {
     autoDecisionRunning = true;
     try {
       console.log('[Auto] 🤔 自主决策：思考下一步...');
-      const result = await agent.handle('system', '你现在可以自主决定做什么。根据当前状态（位置、背包、周围环境、血量、时间等），决定下一步行动。如果需要查询状态，使用查询工具。');
+      const result = await agent.handle('system', '请自主决定下一步行动');
       if (result?.reply) {
-        console.log(`[Auto] 💬 ${result.reply}`);
+        console.log(`\x1b[36m[Auto]\x1b[0m \x1b[33m${result.reply}\x1b[0m`);
       }
       // 清理自主决策产生的 history（不污染对话记忆）
       agent.llm.stripToolHistory();
@@ -191,10 +195,10 @@ async function main() {
       );
     }
 
-    // 记录到记忆
-    if (memory) {
-      memory.remember(`[死亡] 位置: (${loc})`);
-      memory.incStat('deaths');
+    // 记录到日志
+    if (journal) {
+      journal.remember(`[死亡] 位置: (${loc})`);
+      journal.incStat('deaths');
     }
   });
 
@@ -207,8 +211,8 @@ async function main() {
     if (agent) {
       agent.injectEvent(`bot 已重生，当前位置: (${loc})。背包已清空，需要捡回死亡掉落的物品。`);
     }
-    if (memory) {
-      memory.remember(`[重生] 位置: (${loc})`);
+    if (journal) {
+      journal.remember(`[重生] 位置: (${loc})`);
     }
   });
 

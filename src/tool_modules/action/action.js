@@ -8,7 +8,7 @@ class ActionModule {
   constructor(bot, deps) {
     this.bot = bot;
     this.agent = deps.agent;
-    this.memory = deps.memory;
+    this.memory = deps.journal;
     this.messageModule = deps.messageModule;
   }
 
