@@ -3,9 +3,15 @@
  */
 
 const mineflayer = require('mineflayer');
+const pathfinder = require('mineflayer-pathfinder');
 const config = require('./config.json');
 const { LLM } = require('./src/core/llm');
 const logger = require('./src/core/logger');
+const { MessageModule } = require('./src/modules/chat/message');
+const { Memory } = require('./src/modules/chat/memory');
+const { ActionModule } = require('./src/modules/action/action');
+const { QueryModule } = require('./src/modules/query/query');
+const { MoveModule } = require('./src/modules/action/move');
 
 // ===== 全局状态 =====
 let globalReconnectCount = 0;
@@ -13,7 +19,7 @@ let reconnecting = false;
 const MAX_RECONNECT = config.reconnect?.maxAttempts ?? 5;
 
 // ===== 核心模块引用 =====
-let llm;
+let llm, messageModule, memory, actionModule;
 
 async function main() {
   const { host, port, username, version } = config.bot;
@@ -32,18 +38,53 @@ async function main() {
   // ===== 初始化核心模块 =====
   llm = new LLM(config.deepseek);
   logger.attach(bot);
+  bot.loadPlugin(pathfinder.pathfinder);
+
+  const deps = { llm, config };
+
+  // ===== 初始化记忆模块 =====
+  memory = new Memory(bot, deps);
+  memory.init();
+  deps.memory = memory;
+
+  // ===== 初始化行为模块（Agent 模式） =====
+  actionModule = new ActionModule(bot, deps);
+
+  // 注册查询工具
+  const queryModule = new QueryModule(bot);
+  for (const toolDef of queryModule.getToolDefs()) {
+    const executors = queryModule.getExecutors();
+    actionModule.registerTool(toolDef, executors[toolDef.function.name]);
+  }
+
+  // 注册动作工具
+  const moveModule = new MoveModule(bot);
+  for (const toolDef of moveModule.getToolDefs()) {
+    const executors = moveModule.getExecutors();
+    actionModule.registerTool(toolDef, executors[toolDef.function.name]);
+  }
+
+  // ===== 初始化消息模块 =====
+  messageModule = new MessageModule(bot, deps);
+  messageModule.init();
+
+  // 注入人格到 action，共享工具列表
+  actionModule.setPersona(messageModule._persona);
+  messageModule.setTools(actionModule._tools);
+
+  // 处理器链：action 优先 → 聊天兜底
+  messageModule.use(async (username, message) => {
+    return actionModule.handleCommand(username, message);
+  });
+  messageModule.use(async (username, message) => {
+    return messageModule._chatHandler(username, message);
+  });
 
   // ===== 事件路由 =====
 
   bot.once('spawn', () => {
     console.log(`[MC AI Buddy] Spawned at ${Math.round(bot.entity.position.x)},${Math.round(bot.entity.position.y)},${Math.round(bot.entity.position.z)}`);
     globalReconnectCount = 0;
-  });
-
-  // 聊天
-  bot.on('chat', async (username, message) => {
-    if (username === bot.username) return;
-    logger.chat(username, message);
   });
 
   // 死亡
@@ -93,6 +134,9 @@ function handleDisconnect(bot, reason, type) {
 
   reconnecting = true;
 
+  // 彻底关闭旧连接，防止 keepalive 超时等残留事件
+  try { bot._client?.end(); } catch {}
+  try { bot.end?.(); } catch {}
   try { bot._client?.removeAllListeners?.(); } catch {}
   bot.removeAllListeners();
 
@@ -102,11 +146,6 @@ function handleDisconnect(bot, reason, type) {
     : (config.reconnect?.normalDelay ?? 5000);
 
   console.log(`[MC AI Buddy] Reconnecting in ${delay / 1000}s... (${globalReconnectCount}/${MAX_RECONNECT})`);
-
-  setTimeout(() => {
-    try { bot._client?.end(); } catch {}
-    try { bot.end?.(); } catch {}
-  }, 100);
 
   setTimeout(async () => {
     reconnecting = false;
