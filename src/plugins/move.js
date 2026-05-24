@@ -9,6 +9,12 @@ let followTarget = null;
 let followInterval = null;
 let wanderInterval = null;
 
+function stopFollow() {
+  if (followInterval) { clearInterval(followInterval); followInterval = null; }
+  followTarget = null;
+  if (bot?.pathfinder) bot.pathfinder.setGoal(null);
+}
+
 function makeMovements() {
   const mcData = require('minecraft-data')(bot.version);
   const moves = new Movements(bot, mcData);
@@ -39,7 +45,7 @@ module.exports = {
   init(_bot, _deps) { bot = _bot; deps = _deps; },
   start() {
     bot.loadPlugin(require('mineflayer-pathfinder').pathfinder);
-    logger.info('move', 'ready');
+    // ready
   },
   stop() { this.actions.stop(); },
 
@@ -49,11 +55,11 @@ module.exports = {
       type: 'function',
       function: {
         name: 'follow',
-        description: '跟随指定玩家，不指定则跟随最近的玩家',
+        description: '跟随指定玩家',
         parameters: {
           type: 'object',
           properties: {
-            player: { type: 'string', description: '要跟随的玩家名（可选，不填则跟最近的人）' },
+            player: { type: 'string', description: '要跟随的玩家名' },
           },
           required: ['player'],
           additionalProperties: false,
@@ -156,7 +162,7 @@ module.exports = {
 
       followInterval = setInterval(() => {
         if (!followTarget?.entity) {
-          this._stopFollow();
+          stopFollow();
           console.log('[Move] follow: target lost');
           return;
         }
@@ -165,7 +171,7 @@ module.exports = {
 
         // 到达 3 格内 → 停止跟随
         if (dist <= 3) {
-          this._stopFollow();
+          stopFollow();
           console.log('[Move] follow: arrived');
           return;
         }
@@ -173,12 +179,6 @@ module.exports = {
         const goal = new goals.GoalFollow(followTarget.entity, 2);
         bot.pathfinder.setGoal(goal);
       }, 1000);
-    },
-
-    _stopFollow() {
-      if (followInterval) { clearInterval(followInterval); followInterval = null; }
-      followTarget = null;
-      if (bot?.pathfinder) bot.pathfinder.setGoal(null);
     },
 
     /** 漫游探索 */
@@ -202,16 +202,17 @@ module.exports = {
 
     /** 导航到坐标 */
     async goto(params) {
-      if (!params?.x && params?.x !== 0) return;
+      if (!params?.x && params?.x !== 0) return false;
       bot.pathfinder.setMovements(makeMovements());
       const goal = new goals.GoalNear(params.x, params.y ?? bot.entity.position.y, params.z, 2);
       bot.pathfinder.setGoal(goal);
+      return 'running';
     },
 
     /** 停止移动 */
     async stop() {
       if (bot?.pathfinder) {
-        this._stopFollow();
+        stopFollow();
         if (wanderInterval) { clearInterval(wanderInterval); wanderInterval = null; }
         bot.pathfinder.setGoal(null);
       }

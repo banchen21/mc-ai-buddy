@@ -69,7 +69,7 @@ module.exports = {
   version: '1.0.0',
 
   init(_bot, _deps) { bot = _bot; deps = _deps; },
-  start() { logger.info('craft', 'ready'); },
+  start() {},
   stop() {},
 
   /** OpenAI Tool Calls 定义 */

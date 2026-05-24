@@ -1,6 +1,5 @@
 /**
- * 统一日志 — 所有插件共用
- * 同时输出到 console + activity.log + activity.jsonl
+ * 统一日志 — 劫持 console.log 同时写入 activity.log
  */
 const fs = require('fs');
 const path = require('path');
@@ -16,6 +15,23 @@ function iso() {
   return new Date().toISOString();
 }
 
+// ===== 劫持 console.log，同时写文件 =====
+const _originalLog = console.log;
+const _originalError = console.error;
+
+console.log = function (...args) {
+  const line = `[${ts()}] ${args.join(' ')}`;
+  _originalLog(line);
+  try { fs.appendFileSync(LOG_FILE, line + '\n'); } catch (e) {}
+};
+
+console.error = function (...args) {
+  const line = `[${ts()}] ❌ ${args.join(' ')}`;
+  _originalError(line);
+  try { fs.appendFileSync(LOG_FILE, line + '\n'); } catch (e) {}
+};
+
+// ===== logger 对象（保留兼容旧接口） =====
 const logger = {
   _bot: null,
 
@@ -37,10 +53,9 @@ const logger = {
   },
 
   _write(line, json) {
-    console.log(line);
-    try { fs.appendFileSync(LOG_FILE, line + '\n'); } catch (e) { console.error('[Logger] Failed to write activity.log:', e.message); }
+    try { fs.appendFileSync(LOG_FILE, line + '\n'); } catch (e) {}
     if (json) {
-      try { fs.appendFileSync(JSONL_FILE, JSON.stringify({ ts: iso(), ...json }) + '\n'); } catch (e) { console.error('[Logger] Failed to write activity.jsonl:', e.message); }
+      try { fs.appendFileSync(JSONL_FILE, JSON.stringify({ ts: iso(), ...json }) + '\n'); } catch (e) {}
     }
   },
 
@@ -84,18 +99,18 @@ const logger = {
 
   error(plugin, err) {
     const s = this._state();
-    this._write(`[${ts()}] ❌ ${plugin}: ${err.message || err}${this._stateStr()}`,
-      { type: 'error', plugin, error: err.message || String(err), ...s });
+    const msg = err.message || String(err);
+    console.error(`[${ts()}] ❌ ${plugin}: ${msg}${this._stateStr()}`);
+    this._write(`[${ts()}] ❌ ${plugin}: ${msg}${this._stateStr()}`,
+      { type: 'error', plugin, error: msg, ...s });
   },
 
-  /** 状态变化 */
   status(state, detail) {
     const s = this._state();
     this._write(`[${ts()}] 📡 STATUS: ${state}${detail ? ' - ' + detail : ''}${this._stateStr()}`,
       { type: 'status', state, detail, ...s });
   },
 
-  /** 事件 */
   event(name, detail) {
     const s = this._state();
     this._write(`[${ts()}] 🔔 ${name}${detail ? ': ' + detail : ''}${this._stateStr()}`,

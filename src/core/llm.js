@@ -30,8 +30,50 @@ class LLM {
     this.useStrictTools = config.useStrictTools || false;
     this.maxTokens = config.maxTokens || 300;
     this.temperature = config.temperature || 0.7;
+
+    /** Tool Calls 交互历史（assistant tool_calls + tool results） */
     this.history = [];
     this.maxHistory = config.maxHistory || 16;
+
+    /** 多轮对话历史（user + assistant，不含 tool_calls） */
+    this.chatHistory = [];
+    this.maxChatHistory = config.maxChatHistory || 20;
+
+    // 思考模式：disabled 时关闭，否则默认 enabled
+    this.thinkingMode = config.thinkingMode || 'enabled';
+  }
+
+  /**
+   * 获取 extra_body（思考模式控制）
+   */
+  _extraBody() {
+    if (this.thinkingMode === 'disabled') {
+      return { thinking: { type: 'disabled' } };
+    }
+    return {};
+  }
+
+  /**
+   * 添加对话消息到多轮历史
+   * @param {string} role - 'user' | 'assistant'
+   * @param {string} content - 消息内容
+   * @param {string} [name] - 用户名（role='user' 时）
+   */
+  addChatMessage(role, content, name) {
+    const entry = { role, content };
+    if (name) entry.name = name;
+    this.chatHistory.push(entry);
+    if (this.chatHistory.length > this.maxChatHistory) {
+      this.chatHistory = this.chatHistory.slice(-this.maxChatHistory);
+    }
+  }
+
+  /**
+   * 获取多轮对话历史（用于拼接到 messages）
+   * @returns {array} [{role, content, name?}]
+   */
+  getChatHistory() {
+    return [...this.chatHistory];
   }
 
   /** 记录对话历史 */
@@ -43,21 +85,43 @@ class LLM {
     this._trimHistory();
   }
 
-  /** 裁剪历史，保证不拆散 tool_calls + tool 配对 */
+  /**
+   * 裁剪历史
+   *
+   * DeepSeek 思考模式规则：
+   * - 有 tool_calls 的 assistant 消息，其 reasoning_content 必须在后续所有请求中回传
+   * - 不能切断 tool_calls ↔ tool 配对
+   * - 策略：从前面裁剪，但保证不拆散任何 tool_calls → tool 链路
+   */
   _trimHistory() {
     if (this.history.length <= this.maxHistory) return;
 
-    // 从后往前找，确保不切断 tool_calls ↔ tool 配对
-    // 策略：从前面裁剪，但遇到 tool 消息时，把对应的 assistant tool_calls 也保留
     const excess = this.history.length - this.maxHistory;
     let cutAt = excess;
 
+    // 从 cutAt 往后扫描，确保不切断 tool 配对
     for (let i = cutAt; i < this.history.length; i++) {
-      if (this.history[i].role === 'tool') {
+      const msg = this.history[i];
+      if (msg.role === 'tool') {
         // 往前找对应的 assistant tool_calls
         for (let j = i - 1; j >= 0; j--) {
           if (this.history[j].role === 'assistant' && this.history[j].tool_calls) {
             if (j < cutAt) cutAt = j;
+            break;
+          }
+        }
+      }
+    }
+
+    // 如果 cutAt 处是一个 assistant 带 tool_calls，需要保留它
+    // （因为它的 reasoning_content 必须在后续请求中回传）
+    if (cutAt > 0 && cutAt < this.history.length) {
+      const atCut = this.history[cutAt];
+      if (atCut.role === 'assistant' && atCut.tool_calls) {
+        // 再往前找对应的 user 消息
+        for (let j = cutAt - 1; j >= 0; j--) {
+          if (this.history[j].role === 'user') {
+            cutAt = j;
             break;
           }
         }
@@ -70,32 +134,34 @@ class LLM {
   /**
    * 清理历史中所有未配对的 tool_calls
    * 确保每个 assistant tool_calls 后面都有对应的 tool 响应
+   * 保留 reasoning_content（DeepSeek 思考模式要求）
    */
   _cleanOrphanToolCalls() {
-    // 从后往前扫描，移除所有孤立的 assistant tool_calls
     const cleaned = [];
     let pendingToolCalls = false;
+    let removedCount = 0;
 
     for (let i = this.history.length - 1; i >= 0; i--) {
       const msg = this.history[i];
 
       if (msg.role === 'tool') {
-        // tool 响应 → 标记前面的 assistant tool_calls 是合法的
         pendingToolCalls = true;
         cleaned.unshift(msg);
       } else if (msg.role === 'assistant' && msg.tool_calls) {
         if (pendingToolCalls) {
-          // 有对应的 tool 响应，保留
           cleaned.unshift(msg);
           pendingToolCalls = false;
+        } else {
+          removedCount++;
         }
-        // 否则丢弃（孤立的 tool_calls）
       } else {
-        // user / system / 普通 assistant → 保留
         cleaned.unshift(msg);
       }
     }
 
+    if (removedCount > 0) {
+      console.log(`[LLM] 🧹 Cleaned ${removedCount} orphan tool_calls from history`);
+    }
     this.history = cleaned;
   }
 
@@ -115,6 +181,20 @@ class LLM {
 - Iron Pickaxe (tier3): diamond_ore, gold_ore, redstone_ore, emerald_ore
 - Diamond Pickaxe (tier4): obsidian, ancient_debris
 
+**How to call tools (MUST follow exact format):**
+- follow: {"player":"<name>"} — follow a player by name
+- wander: {} — explore randomly
+- goto: {"x":<num>,"y":<num>,"z":<num>} — navigate to coordinates
+- stop: {} — stop all movement
+- left_click: {"target":"<entity|coords>","action":"attack|dig|click","item":"<tool>"} — attack entity or dig block
+- use: {"action":"eat"} or {"block":"<name>","action":"smelt","input":"<item>","fuel":"<fuel>","count":<num>}
+- craft: {"item":"<name>","count":<num>} — craft items
+- place: {"block":"<name>","x":<num>,"y":<num>,"z":<num>} — place a block
+- sleep: {} — sleep in nearest bed
+- chat: {"message":"<text>"} — send chat message
+- give: {"item":"<name>","count":<num>,"player":"<name>"} — give items to player
+- search_wiki: {"query":"<text>"} — search Minecraft knowledge
+
 **Priority (use common sense, not rigid order):**
 - Under attack / low HP → dodge or fight
 - Hungry → eat
@@ -125,10 +205,10 @@ class LLM {
 - Otherwise → wander and explore
 
 **Tips:**
-- Don't repeat the same action if it's already in progress (e.g. don't follow() again if already following)
+- Don't repeat the same action if it's already in progress
 - Don't repeat failed actions; try something different
 - Check your inventory and equipped tool before acting
-- If nothing needs doing, you can return no tool_calls (just reply is fine)`;
+- If nothing needs doing, return no tool_calls`;
 
     const prompt = `📊 Perception:
 🩸 HP:${context.health}/20 | 🍖 Food:${context.food}
@@ -183,8 +263,15 @@ Entities: ${context.entities || 'none'}`;
 
   /**
    * 底层 Tool Calls 调用
+   *
+   * DeepSeek 规则：
+   * - tool_calls 后必须紧跟对应的 tool 响应消息
+   * - 本方法不修改 history，调用方负责在拿到 tool_calls 后调用 addToolResults()
    */
   async _callWithTools(system, prompt, tools, toolChoice = 'auto') {
+    // 清理孤立的 tool_calls（防止上次未正确追加 tool 结果）
+    this._cleanOrphanToolCalls();
+
     try {
       const finalTools = this.useStrictTools
         ? tools.map(t => ({
@@ -193,9 +280,10 @@ Entities: ${context.entities || 'none'}`;
           }))
         : tools;
 
+      // 构建消息：system + 历史 + 当前 prompt
       const messages = [
         { role: 'system', content: system },
-        ...this.history.slice(-12),
+        ...this.history,
         { role: 'user', content: prompt },
       ];
 
@@ -205,13 +293,14 @@ Entities: ${context.entities || 'none'}`;
         tools: finalTools,
         tool_choice: toolChoice,
         max_tokens: this.maxTokens,
+        extra_body: this._extraBody(),
       });
 
       const msg = response.choices[0].message;
 
-      console.log(`[LLM] Response: content="${(msg.content||'').substring(0,50)}", tool_calls=${msg.tool_calls?.length || 0}`);
+      console.log(`[LLM] Response: content="${(msg.content||'').substring(0,50)}", tool_calls=${msg.tool_calls?.length || 0}, reasoning=${msg.reasoning_content ? 'yes' : 'no'}`);
 
-      // 按 DeepSeek 文档：直接 push 整个 message（含 reasoning_content + tool_calls）
+      // 把当前 user prompt 和 assistant 回复 push 到 history
       this.history.push({ role: 'user', content: prompt });
       this.history.push(msg);
       this._trimHistory();
@@ -236,10 +325,9 @@ Entities: ${context.entities || 'none'}`;
             tools: this.useStrictTools ? tools.map(t => ({ ...t, function: { ...t.function, strict: true } })) : tools,
             tool_choice: toolChoice,
             max_tokens: this.maxTokens,
+            extra_body: this._extraBody(),
           });
           const msg = response.choices[0].message;
-          const reasoning = msg.reasoning_content || null;
-          this.remember('user', prompt);
           this.history.push({ role: 'user', content: prompt });
           this.history.push(msg);
           return { reply: msg.content || null, tool_calls: msg.tool_calls || null };
@@ -248,7 +336,6 @@ Entities: ${context.entities || 'none'}`;
           this.history = [];
         }
       }
-      // 出错时返回空，让 brain 处理
       return { reply: null, tool_calls: null };
     }
   }

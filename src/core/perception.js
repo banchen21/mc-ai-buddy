@@ -20,6 +20,38 @@ class Perception {
     this.damageLog = [];
     this.underAttack = false;
     this.lastAttacker = null;
+
+    /** 缓存 mcData 和预计算的方块 ID 列表 */
+    this._mcDataCache = null;
+    this._cachedVersion = null;
+    this._blockIdCache = null; // { logIds, oreIds, valIds, dangerIds }
+  }
+
+  /** 获取 mcData（带缓存） */
+  _getMcData(bot) {
+    const version = bot.version;
+    if (this._mcDataCache && this._cachedVersion === version) {
+      return this._mcDataCache;
+    }
+    this._mcDataCache = require('minecraft-data')(version);
+    this._cachedVersion = version;
+    this._blockIdCache = null; // 版本变了，清方块缓存
+    return this._mcDataCache;
+  }
+
+  /** 获取预计算的方块 ID 列表 */
+  _getBlockIds(bot) {
+    if (this._blockIdCache) return this._blockIdCache;
+    const mcData = this._getMcData(bot);
+    const entries = Object.entries(mcData.blocksByName);
+
+    this._blockIdCache = {
+      logIds: entries.filter(([n]) => n.includes('log') && !n.includes('stripped')).map(([, b]) => b.id),
+      oreIds: entries.filter(([n]) => ORE_PATTERN.test(n)).map(([, b]) => b.id),
+      valIds: entries.filter(([n]) => VALUABLE.test(n)).map(([, b]) => b.id),
+      dangerIds: entries.filter(([n]) => DANGER.test(n)).map(([, b]) => b.id),
+    };
+    return this._blockIdCache;
   }
 
   recordDamage(source, damage) {
@@ -148,12 +180,9 @@ class Perception {
     const parts = [];
     const myPos = bot.entity.position;
     try {
-      const mcData = require('minecraft-data')(bot.version);
+      const { logIds, oreIds, valIds, dangerIds } = this._getBlockIds(bot);
       const R = 64;
 
-      const logIds = Object.entries(mcData.blocksByName)
-        .filter(([n]) => n.includes('log') && !n.includes('stripped'))
-        .map(([, b]) => b.id);
       if (logIds.length) {
         const logs = bot.findBlocks({ matching: logIds, maxDistance: R, count: 50 });
         if (logs.length) {
@@ -162,8 +191,6 @@ class Perception {
         }
       }
 
-      const oreIds = Object.entries(mcData.blocksByName)
-        .filter(([n]) => ORE_PATTERN.test(n)).map(([, b]) => b.id);
       if (oreIds.length) {
         const ores = bot.findBlocks({ matching: oreIds, maxDistance: R, count: 50 });
         if (ores.length) {
@@ -178,8 +205,6 @@ class Perception {
         }
       }
 
-      const valIds = Object.entries(mcData.blocksByName)
-        .filter(([n]) => VALUABLE.test(n)).map(([, b]) => b.id);
       if (valIds.length) {
         const val = bot.findBlocks({ matching: valIds, maxDistance: R, count: 20 });
         if (val.length) {
@@ -193,8 +218,6 @@ class Perception {
         }
       }
 
-      const dangerIds = Object.entries(mcData.blocksByName)
-        .filter(([n]) => DANGER.test(n)).map(([, b]) => b.id);
       if (dangerIds.length) {
         const dangers = bot.findBlocks({ matching: dangerIds, maxDistance: R, count: 10 });
         if (dangers.length) {
