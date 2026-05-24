@@ -132,6 +132,26 @@ class Memory {
   getStat(key) {
     return this.data.stats[key] || 0;
   }
+
+  // ===== 对话历史持久化 =====
+
+  /** 保存 LLM 对话历史到记忆 */
+  saveHistory(history) {
+    // 只保留最近 20 条，且去掉 tool_calls 中的冗余字段
+    this.data.chatHistory = history.slice(-20).map(msg => ({
+      role: msg.role,
+      content: msg.content || '',
+      ...(msg.name ? { name: msg.name } : {}),
+      ...(msg.tool_calls ? { tool_calls: msg.tool_calls } : {}),
+      ...(msg.tool_call_id ? { tool_call_id: msg.tool_call_id } : {}),
+    }));
+    this._save();
+  }
+
+  /** 恢复 LLM 对话历史 */
+  loadHistory() {
+    return this.data.chatHistory || [];
+  }
 }
 
 module.exports = { Memory };

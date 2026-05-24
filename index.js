@@ -6,12 +6,15 @@ const mineflayer = require('mineflayer');
 const pathfinder = require('mineflayer-pathfinder');
 const config = require('./config.json');
 const { LLM } = require('./src/core/llm');
+const { Agent } = require('./src/core/agent');
 const logger = require('./src/core/logger');
-const { MessageModule } = require('./src/modules/chat/message');
-const { Memory } = require('./src/modules/chat/memory');
-const { ActionModule } = require('./src/modules/action/action');
-const { QueryModule } = require('./src/modules/query/query');
-const { MoveModule } = require('./src/modules/action/move');
+const { MessageModule } = require('./src/tool_modules/chat/message');
+const { Memory } = require('./src/tool_modules/chat/memory');
+const { ActionModule } = require('./src/tool_modules/action/action');
+const { QueryModule } = require('./src/tool_modules/query/query');
+const { MoveModule } = require('./src/tool_modules/action/move');
+const { InteractModule } = require('./src/tool_modules/action/interact');
+const { CraftModule } = require('./src/tool_modules/action/craft');
 
 // ===== 全局状态 =====
 let globalReconnectCount = 0;
@@ -19,7 +22,7 @@ let reconnecting = false;
 const MAX_RECONNECT = config.reconnect?.maxAttempts ?? 5;
 
 // ===== 核心模块引用 =====
-let llm, messageModule, memory, actionModule;
+let llm, agent, messageModule, memory, actionModule;
 
 async function main() {
   const { host, port, username, version } = config.bot;
@@ -37,47 +40,47 @@ async function main() {
 
   // ===== 初始化核心模块 =====
   llm = new LLM(config.deepseek);
+  agent = new Agent(llm, { maxRounds: config.deepseek.maxRounds ?? 5 });
   logger.attach(bot);
   bot.loadPlugin(pathfinder.pathfinder);
 
-  const deps = { llm, config };
+  const deps = { llm, agent, config };
 
   // ===== 初始化记忆模块 =====
   memory = new Memory(bot, deps);
   memory.init();
   deps.memory = memory;
 
-  // ===== 初始化行为模块（Agent 模式） =====
-  actionModule = new ActionModule(bot, deps);
-
-  // 注册查询工具
-  const queryModule = new QueryModule(bot);
-  for (const toolDef of queryModule.getToolDefs()) {
-    const executors = queryModule.getExecutors();
-    actionModule.registerTool(toolDef, executors[toolDef.function.name]);
-  }
-
-  // 注册动作工具
-  const moveModule = new MoveModule(bot);
-  for (const toolDef of moveModule.getToolDefs()) {
-    const executors = moveModule.getExecutors();
-    actionModule.registerTool(toolDef, executors[toolDef.function.name]);
-  }
+  // 恢复 LLM 对话历史（多轮对话记忆）
+  llm.history = memory.loadHistory();
+  // 每次 LLM 调用后自动保存历史
+  llm._onHistoryChange = (history) => memory.saveHistory(history);
 
   // ===== 初始化消息模块 =====
   messageModule = new MessageModule(bot, deps);
   messageModule.init();
+  deps.messageModule = messageModule;
 
-  // 注入人格到 action，共享工具列表
-  actionModule.setPersona(messageModule._persona);
-  messageModule.setTools(actionModule._tools);
+  // ===== 初始化行为模块（Agent 模式） =====
+  actionModule = new ActionModule(bot, deps);
 
-  // 处理器链：action 优先 → 聊天兜底
+  // 注册工具到 Agent
+  agent.registerModule(new QueryModule(bot));
+  agent.registerModule(new MoveModule(bot));
+  agent.registerModule(new InteractModule(bot));
+  agent.registerModule(new CraftModule(bot));
+
+  // 注入人格到 Agent
+  agent.setPersona(messageModule._persona);
+
+  // 中间回复实时发送到游戏
+  agent._onChat = (msg) => {
+    messageModule.send(msg);
+  };
+
+  // 处理器链：action 统一处理（工具调用 + 纯聊天）
   messageModule.use(async (username, message) => {
     return actionModule.handleCommand(username, message);
-  });
-  messageModule.use(async (username, message) => {
-    return messageModule._chatHandler(username, message);
   });
 
   // ===== 事件路由 =====
