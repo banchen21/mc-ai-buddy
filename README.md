@@ -5,6 +5,7 @@
   <img src="https://img.shields.io/badge/Minecraft-1.20.1-blue" alt="Minecraft 1.20.1">
   <img src="https://img.shields.io/badge/LLM-DeepSeek-purple" alt="DeepSeek">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
+  <a href="https://73info.cn"><img src="https://img.shields.io/badge/Platform-73Info_柒叁信息-1a237e?style=flat" alt="73Info"></a>
 </p>
 
 <p align="center">
@@ -223,3 +224,13 @@ mc-ai-buddy/
 ## 许可证
 
 [MIT](LICENSE)
+
+---
+
+<div align="center">
+
+🌐 **[73Info 柒叁信息](https://73info.cn)** — 开发者资源发现 · 需求对接 · 定制协作平台
+
+*需要 AI 开发？来 73Info 找到靠谱的开发者。*
+
+</div>
