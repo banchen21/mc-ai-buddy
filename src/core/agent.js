@@ -7,8 +7,8 @@
  *   3. 委托 TaskOrchestrator 执行任务流
  *   4. 管理 LLM 对话历史
  */
-const { TaskOrchestrator } = require('./task-orchestrator');
-const logger = require('./logger');
+const { TaskOrchestrator } = require("./task-orchestrator");
+const logger = require("./logger");
 
 class Agent {
   constructor(llm, options = {}) {
@@ -21,7 +21,7 @@ class Agent {
     this._executors = {};
 
     /** 人格设定 */
-    this._persona = '';
+    this._persona = "";
 
     /** 编排器配置 */
     this._maxRounds = options.maxRounds || 50;
@@ -90,28 +90,77 @@ class Agent {
     const memoryTools = [];
     for (const t of this._tools) {
       const name = t.function.name;
-      if (['get_inventory','get_armor','get_held_item','get_offhand','get_health','get_position','get_nearby_entities','get_block','get_surrounding_blocks','scan_surroundings','look_at_block','get_time','get_chest','get_furnace','get_container','search_web'].includes(name)) {
+      if (
+        [
+          "get_inventory",
+          "get_armor",
+          "get_held_item",
+          "get_offhand",
+          "get_health",
+          "get_position",
+          "get_nearby_entities",
+          "get_block",
+          "get_surrounding_blocks",
+          "scan_surroundings",
+          "look_at_block",
+          "get_time",
+          "get_chest",
+          "get_furnace",
+          "get_container",
+          "search_web",
+        ].includes(name)
+      ) {
         queryTools.push(name);
-      } else if (['goto','follow','goto_player','wander','stop','look_at','jump','find_block','sleep'].includes(name)) {
+      } else if (
+        [
+          "goto",
+          "goto_player",
+          "wander",
+          "stop",
+          "jump",
+          "find_block",
+          "sleep",
+        ].includes(name)
+      ) {
         moveTools.push(name);
-      } else if (['dig','place','pillar_up','attack','give','equip','drop','collect','use_item','activate_block','take_from_chest','put_to_chest','take_from_furnace','send_chat'].includes(name)) {
+      } else if (
+        [
+          "dig",
+          "place",
+          "pillar_up",
+          "attack",
+          "give",
+          "equip",
+          "drop",
+          "collect",
+          "use_item",
+          "activate_block",
+          "take_from_chest",
+          "put_to_chest",
+          "take_from_furnace",
+          "send_chat",
+        ].includes(name)
+      ) {
         actionTools.push(name);
-      } else if (['craft','search_recipe','smelt'].includes(name)) {
+      } else if (["craft", "search_recipe", "smelt"].includes(name)) {
         craftTools.push(name);
-      } else if (['remember','recall','forget'].includes(name)) {
+      } else if (["remember", "recall", "forget"].includes(name)) {
         memoryTools.push(name);
       }
     }
 
     const toolSection = [
-      queryTools.length && `🔍 查询: ${queryTools.join('、')}`,
-      moveTools.length && `🚶 移动: ${moveTools.join('、')}`,
-      actionTools.length && `⛏️ 交互: ${actionTools.join('、')}`,
-      craftTools.length && `🔧 合成: ${craftTools.join('、')}`,
-      memoryTools.length && `🧠 记忆: ${memoryTools.join('、')}`,
-    ].filter(Boolean).join('\n');
+      queryTools.length && `🔍 查询: ${queryTools.join("、")}`,
+      moveTools.length && `🚶 移动: ${moveTools.join("、")}`,
+      actionTools.length && `⛏️ 交互: ${actionTools.join("、")}`,
+      craftTools.length && `🔧 合成: ${craftTools.join("、")}`,
+      memoryTools.length && `🧠 记忆: ${memoryTools.join("、")}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
 
-    return (this._persona || '你是 Minecraft 中的 AI 助手。') +
+    return (
+      (this._persona || "你是 Minecraft 中的 AI 助手。") +
       `\n\n## 当前对话玩家\n${username}` +
       `\n\n## 可用工具\n${toolSection}` +
       `\n\n## 工具使用规则\n` +
@@ -121,7 +170,8 @@ class Agent {
       `4. 纯聊天/闲聊/问知识类问题 → 直接文字回复，不要调用任何工具。Minecraft 知识类问题可用 search_web。\n` +
       `5. 每次只调用必要的工具，不要过度调用。能 1 个工具解决的不要调 2 个。\n` +
       `6. 工具执行完毕后，用自然语言总结结果告诉玩家。不要只返回工具原始输出。\n` +
-      `7. 如果玩家指令不明确（如"挖矿"但没说挖什么），先问清楚再行动。`;
+      `7. 如果玩家指令不明确（如"挖矿"但没说挖什么），先问清楚再行动。`
+    );
   }
 
   // ===== 主入口 =====
@@ -133,12 +183,12 @@ class Agent {
    */
   injectEvent(eventSummary) {
     this.llm.history.push({
-      role: 'user',
+      role: "user",
       content: `[系统通知] ${eventSummary}`,
     });
     this.llm.history.push({
-      role: 'assistant',
-      content: '（已自动处理）',
+      role: "assistant",
+      content: "（已自动处理）",
     });
     this.llm._trimHistory();
     if (this.llm._onHistoryChange) {
@@ -158,9 +208,16 @@ class Agent {
     const system = this._buildSystemPrompt(username);
     const orch = this._getOrchestrator();
     const anthropicTools = this._toAnthropicTools();
-    // 聊天模式限制轮次加快响应，自主模式保留完整轮次
-    const maxRounds = username === 'system' ? this._maxRounds : Math.min(this._maxRounds, 5);
-    return orch.run(system, message, username, anthropicTools, maxRounds, opts.abortSignal);
+    // 聊天模式限制轮次加快响应（最多 15 轮），自主模式保留完整轮次
+    const maxRounds = this._maxRounds;
+    return orch.run(
+      system,
+      message,
+      username,
+      anthropicTools,
+      maxRounds,
+      opts.abortSignal,
+    );
   }
 }
 

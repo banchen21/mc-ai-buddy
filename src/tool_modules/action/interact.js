@@ -516,6 +516,9 @@ class InteractModule {
    * 重复 count 次
    */
   async _pillarUp({ block, count = 1 }) {
+    // 先停止寻路，避免与 pathfinder 冲突
+    this.bot.pathfinder?.setGoal(null);
+
     const item = this.bot.inventory.items().find((i) => i.name.includes(block));
     if (!item) return `背包没有 ${block}`;
 
@@ -523,22 +526,21 @@ class InteractModule {
 
     let placed = 0;
     for (let i = 0; i < count; i++) {
-      // 1. 记录脚下方块（放置的参照面）
-      const pos = this.bot.entity.position.floored();
-      const refBlock = this.bot.blockAt(pos.offset(0, -1, 0));
-      if (!refBlock || refBlock.name === "air") {
+      // 1. 记录起跳前脚下的方块（作为放置参照面）
+      const feetPos = this.bot.entity.position.floored();
+      const refBlock = this.bot.blockAt(feetPos.offset(0, -1, 0));
+      if (!refBlock || refBlock.name === "air" || refBlock.name === "cave_air") {
         return `脚下没有方块可以参照，已搭了 ${placed} 格`;
       }
 
       // 2. 跳起来
       this.bot.setControlState("jump", true);
+      await new Promise((r) => setTimeout(r, 250));
 
-      // 3. 等跳到最高点（约 200ms 后在空中）
-      await new Promise((r) => setTimeout(r, 200));
-
-      // 4. 在空中往脚下放方块
+      // 3. 看向脚下，在 refBlock 上方（即 bot 脚下位置）放方块
       try {
-        await this.bot.lookAt(pos.offset(0.5, -0.5, 0.5));
+        await this.bot.lookAt(feetPos.offset(0.5, -0.5, 0.5));
+        // placeBlock: 在 refBlock 的上表面放置方块
         await this.bot.placeBlock(refBlock, new Vec3(0, 1, 0));
         placed++;
       } catch (err) {
@@ -546,9 +548,9 @@ class InteractModule {
         return `搭方块失败: ${err.message}，已搭了 ${placed} 格`;
       }
 
-      // 5. 松开跳跃，等落地
+      // 4. 松开跳跃，等落地到新方块上
       this.bot.setControlState("jump", false);
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 350));
     }
 
     return `搭了 ${placed} 格 ${block}，上升了 ${placed} 格`;

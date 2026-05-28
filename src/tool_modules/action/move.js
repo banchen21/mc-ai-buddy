@@ -2,7 +2,7 @@
  * 移动模块 — 基于 mineflayer-pathfinder
  *
  * 工具：
- *   goto / follow / goto_player / wander / stop / look_at / jump / find_block / sleep
+ *   goto / goto_player / wander / stop / jump / find_block / sleep
  *
  * 依赖注入：
  *   deps.passiveModule — 用于检查闪避冲突
@@ -73,21 +73,6 @@ class MoveModule {
       {
         type: 'function',
         function: {
-          name: 'follow',
-          description: '持续跟随指定玩家（动态目标，不会自动停止）',
-          parameters: {
-            type: 'object',
-            properties: {
-              player: { type: 'string', description: '玩家名' },
-              range: { type: 'number', description: '跟随距离（默认 2）' },
-            },
-            required: ['player'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
           name: 'goto_player',
           description: '走到指定玩家旁边后自动停止（一次性目标）',
           parameters: {
@@ -120,23 +105,6 @@ class MoveModule {
           name: 'stop',
           description: '停止所有移动',
           parameters: { type: 'object', properties: {}, required: [] },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'look_at',
-          description: '看向指定坐标或玩家',
-          parameters: {
-            type: 'object',
-            properties: {
-              x: { type: 'number' },
-              y: { type: 'number' },
-              z: { type: 'number' },
-              player: { type: 'string' },
-            },
-            required: [],
-          },
         },
       },
       {
@@ -178,11 +146,9 @@ class MoveModule {
   getExecutors() {
     return {
       goto:        (p) => this._goto(p),
-      follow:      (p) => this._follow(p),
       goto_player: (p) => this._gotoPlayer(p),
       wander:      (p) => this._wander(p),
       stop:        ()  => this._stop(),
-      look_at:     (p) => this._lookAt(p),
       jump:        ()  => this._jump(),
       find_block:  (p) => this._findBlock(p),
       sleep:       ()  => this._sleep(),
@@ -208,9 +174,6 @@ class MoveModule {
       return '请提供有效的 x, y, z 坐标';
     }
 
-    // 覆盖 follow 时清除视角锁定
-    this._clearLookAt();
-
     const tx = Math.round(x);
     const ty = Math.round(y);
     const tz = Math.round(z);
@@ -233,50 +196,11 @@ class MoveModule {
   }
 
   /**
-   * follow — 动态目标，持续跟随 + 视角锁定玩家
-   */
-  async _follow({ player, range = 2 }) {
-    const conflict = this._checkDodgeConflict();
-    if (conflict) return conflict;
-
-    const target = this.bot.players[player]?.entity;
-    if (!target) return `找不到玩家 ${player}`;
-
-    this._ensureMovements();
-    // dynamic=true：到达后目标保持活跃，不会触发 goal_reached
-    this.bot.pathfinder.setGoal(new goals.GoalFollow(target, range), true);
-
-    // 持续看向玩家（physicsTick 每 tick 触发）
-    this._clearLookAt();
-    this._lookAtTarget = target;
-    this._lookAtHandler = () => {
-      if (this._lookAtTarget && this._lookAtTarget.isValid) {
-        this.bot.lookAt(this._lookAtTarget.position.offset(0, 1.6, 0));
-      }
-    };
-    this.bot.on('physicsTick', this._lookAtHandler);
-
-    return `正在跟随 ${player}（距离 ${range} 格）`;
-  }
-
-  /** 清除跟随视角锁定 */
-  _clearLookAt() {
-    if (this._lookAtHandler) {
-      this.bot.removeListener('physicsTick', this._lookAtHandler);
-      this._lookAtHandler = null;
-    }
-    this._lookAtTarget = null;
-  }
-
-  /**
    * goto_player — 一次性目标，走到玩家旁边后自动停止
    */
   async _gotoPlayer({ player, range = 2 }) {
     const conflict = this._checkDodgeConflict();
     if (conflict) return conflict;
-
-    // 覆盖 follow 时清除视角锁定
-    this._clearLookAt();
 
     const target = this.bot.players[player]?.entity;
     if (!target) return `找不到玩家 ${player}`;
@@ -323,31 +247,7 @@ class MoveModule {
   _stop() {
     this.bot.pathfinder.setGoal(null);
     this.bot.clearControlStates();
-    this._clearLookAt();
     return '已停止';
-  }
-
-  /**
-   * look_at — 看向坐标或玩家
-   */
-  async _lookAt({ x, y, z, player }) {
-    if (player) {
-      const target = this.bot.players[player]?.entity;
-      if (target) {
-        await this.bot.lookAt(target.position.offset(0, 1.6, 0));
-        return `看向 ${player}`;
-      }
-      return `找不到玩家 ${player}`;
-    }
-    if (x !== undefined && y !== undefined && z !== undefined) {
-      if (typeof x !== 'number' || typeof y !== 'number' || typeof z !== 'number' ||
-          !isFinite(x) || !isFinite(y) || !isFinite(z)) {
-        return '请提供有效的 x, y, z 坐标';
-      }
-      await this.bot.lookAt(new Vec3(x, y, z));
-      return `看向 ${Math.round(x)},${Math.round(y)},${Math.round(z)}`;
-    }
-    return '请指定坐标或玩家';
   }
 
   /**
@@ -365,9 +265,6 @@ class MoveModule {
   async _findBlock({ block, maxDistance = 64 }) {
     const conflict = this._checkDodgeConflict();
     if (conflict) return conflict;
-
-    // 覆盖 follow 时清除视角锁定
-    this._clearLookAt();
 
     // 兼容新旧版 mineflayer：优先用 registry，回退用 mcData
     let blockIds;

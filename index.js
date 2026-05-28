@@ -44,7 +44,7 @@ async function main() {
 
   // ===== 初始化核心模块 =====
   llm = new LLM(config.llm);
-  agent = new Agent(llm, { maxRounds: config.llm.maxRounds ?? 5 });
+  agent = new Agent(llm, { maxRounds: config.llm.maxRounds ?? 50 });
   logger.attach(bot);
   bot.loadPlugin(pathfinder.pathfinder);
 
@@ -178,7 +178,7 @@ async function main() {
       console.log('[Auto] 🤔 自主决策：思考下一步...');
       autoAbort.cancelled = false;
       const result = await agent.handle('system',
-        '请根据当前状态自主决定下一步行动。必须调用工具执行具体操作（如挖矿、移动、合成等），不要只回复文字。如果没有明确目标，可以 wander 探索周围。',
+        '请自行决策',
         { abortSignal: autoAbort }
       );
       if (result?.reply) {
