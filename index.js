@@ -177,11 +177,28 @@ async function main() {
     try {
       console.log('[Auto] 🤔 自主决策：思考下一步...');
       autoAbort.cancelled = false;
-      const result = await agent.handle('system', '请自主决定下一步行动', { abortSignal: autoAbort });
+      const result = await agent.handle('system',
+        '请根据当前状态自主决定下一步行动。必须调用工具执行具体操作（如挖矿、移动、合成等），不要只回复文字。如果没有明确目标，可以 wander 探索周围。',
+        { abortSignal: autoAbort }
+      );
       if (result?.reply) {
-        console.log(`\x1b[36m[Auto]\x1b[0m \x1b[33m${result.reply}\x1b[0m`);
+        messageModule.send(result.reply);
       }
       // 清理自主决策产生的 history（不污染对话记忆）
+      // stripToolHistory 会保留纯文本 user/assistant，但自主决策中
+      // LLM 可能产生纯文本"幻觉回复"（如"烧好了！我们有铁锭了！"），
+      // 这些也必须清理。最简单的方式：直接移除所有 system 用户的消息
+      // 以及紧随其后的 assistant 回复。
+      agent.llm.history = agent.llm.history.filter((msg, i, arr) => {
+        // 移除 system 用户消息
+        if (msg.role === 'user' && msg.name === 'system') return false;
+        // 移除紧跟在 system 用户消息后的 assistant 回复（幻觉文本）
+        if (msg.role === 'assistant' && i > 0 &&
+            arr[i - 1].role === 'user' && arr[i - 1].name === 'system') {
+          return false;
+        }
+        return true;
+      });
       agent.llm.stripToolHistory();
     } catch (err) {
       console.log(`[Auto] ❌ ${err.message}`);

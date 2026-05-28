@@ -6,10 +6,10 @@
     "version": "1.20.1"
   },
   "llm": {
-    "apiKey": "sk-your-api-key-here",
-    "baseUrl": "https://api.deepseek.com/v1",
-    "model": "deepseek-chat",
-    "maxTokens": 300,
+    "apiKey": "sk-ant-your-anthropic-api-key",
+    "baseUrl": "",
+    "model": "claude-sonnet-4-6",
+    "maxTokens": 1024,
     "temperature": 0.7,
     "maxHistory": 16,
     "maxRounds": 50

@@ -2,10 +2,18 @@
  * 查询模块 — 提供 bot 自身状态查询工具
  * 供 action 模块注册使用
  */
+const OpenAI = require('openai');
+
 class QueryModule {
   constructor(bot, deps) {
     this.bot = bot;
     this.llm = deps?.llm || null;
+    // 独立的搜索客户端（保持 MiMo/OpenAI 兼容接口）
+    const voiceCfg = deps?.config?.voice || {};
+    this._searchClient = new OpenAI({
+      apiKey: voiceCfg.apiKey || deps?.config?.llm?.apiKey || '',
+      baseURL: voiceCfg.baseUrl || 'https://api.xiaomimimo.com/v1',
+    });
   }
 
   /** 获取所有查询工具定义 */
@@ -159,6 +167,20 @@ class QueryModule {
       {
         type: 'function',
         function: {
+          name: 'scan_surroundings',
+          description: '以玩家头部为中心向周围辐射扫描，识别所有与空气接触的可见方块和实体。遇到方块自动停止射线，能快速感知周围环境全貌。返回方块列表和实体列表。',
+          parameters: {
+            type: 'object',
+            properties: {
+              radius: { type: 'number', description: '扫描半径（格），默认 8，最大 16' },
+            },
+            required: [],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
           name: 'search_web',
           description: '上网搜索 Minecraft 相关的知识（合成配方、机制、攻略等）。当玩家问游戏知识类问题时使用。',
           parameters: {
@@ -191,6 +213,7 @@ class QueryModule {
       get_chest: (p) => this._getChest(p),
       get_furnace: (p) => this._getFurnace(p),
       get_container: (p) => this._getContainer(p),
+      scan_surroundings: (p) => this._scanSurroundings(p),
       search_web: (p) => this._searchWeb(p),
     };
   }
@@ -459,6 +482,109 @@ class QueryModule {
     return sorted.slice(0, 30).map(b => `${b.name}(${b.pos.x},${b.pos.y},${b.pos.z})`).join(', ');
   }
 
+  /**
+   * scan_surroundings — 以玩家头部为中心，向周围全方向辐射扫描
+   * 识别所有与空气接触的可见方块 + 可见实体
+   * 射线遇到非空气方块自动停止，只记录"表面方块"
+   */
+  _scanSurroundings({ radius = 8 } = {}) {
+    const p = this.bot.entity?.position;
+    if (!p) return '未知';
+    const { Vec3 } = require('vec3');
+    const eyePos = new Vec3(p.x, p.y + 1.6, p.z);
+    const maxDist = Math.min(radius, 16);
+    const blocks = new Map();    // key -> { name, pos, dist }
+    const entities = new Map();  // id -> { name, pos, dist }
+
+    // 斐波那契球面均匀分布射线，密度随半径增大
+    const rayCount = Math.floor(maxDist * maxDist * 4);
+
+    for (let i = 0; i < rayCount; i++) {
+      const phi = Math.acos(1 - 2 * (i + 0.5) / rayCount);
+      const theta = Math.PI * (1 + Math.sqrt(5)) * i;
+      const dx = Math.sin(phi) * Math.cos(theta);
+      const dy = Math.sin(phi) * Math.sin(theta);
+      const dz = Math.cos(phi);
+
+      let pos = eyePos.clone();
+      for (let step = 0; step < maxDist * 2; step++) {
+        pos = pos.plus(new Vec3(dx * 0.5, dy * 0.5, dz * 0.5));
+
+        // 超出半径则停止
+        if (pos.distanceTo(eyePos) > maxDist) break;
+
+        const blockPos = new Vec3(Math.round(pos.x), Math.round(pos.y), Math.round(pos.z));
+        const block = this.bot.blockAt(blockPos);
+        if (!block) break;
+
+        // 遇到非空气方块 → 记录并停止射线
+        if (block.name !== 'air' && block.name !== 'cave_air' && block.name !== 'void_air') {
+          const key = blockPos.toString();
+          if (!blocks.has(key)) {
+            const dist = Math.round(eyePos.distanceTo(blockPos));
+            blocks.set(key, { name: block.displayName || block.name, pos: blockPos.clone(), dist });
+          }
+          break;
+        }
+
+        // 在空气中检测实体碰撞
+        const allEntities = Object.values(this.bot.entities || {});
+        for (const e of allEntities) {
+          if (e === this.bot.entity) continue;
+          if (entities.has(e.id)) continue;
+          const ePos = e.position;
+          const dx2 = pos.x - ePos.x;
+          const dy2 = pos.y - (ePos.y + (e.height || 1.8) / 2);
+          const dz2 = pos.z - ePos.z;
+          const hitDist = Math.sqrt(dx2 * dx2 + dy2 * dy2 + dz2 * dz2);
+          if (hitDist < 1.0) {
+            const dist = Math.round(eyePos.distanceTo(ePos));
+            const name = e.username || e.displayName || e.name || '未知';
+            entities.set(e.id, { name, pos: ePos.clone(), dist });
+          }
+        }
+      }
+    }
+
+    // 构建输出
+    const parts = [];
+
+    // 方块部分：按距离排序，分类统计
+    const sortedBlocks = [...blocks.values()].sort((a, b) => a.dist - b.dist);
+    if (sortedBlocks.length > 0) {
+      // 统计方块类型
+      const typeCount = {};
+      for (const b of sortedBlocks) {
+        typeCount[b.name] = (typeCount[b.name] || 0) + 1;
+      }
+      const typeSummary = Object.entries(typeCount)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, count]) => `${name} x${count}`)
+        .join(', ');
+
+      const detailList = sortedBlocks.slice(0, 20)
+        .map(b => `${b.name}(${b.pos.x},${b.pos.y},${b.pos.z})`)
+        .join(', ');
+
+      parts.push(`[方块] ${typeSummary}\n  最近: ${detailList}`);
+    } else {
+      parts.push('[方块] 无');
+    }
+
+    // 实体部分
+    const sortedEntities = [...entities.values()].sort((a, b) => a.dist - b.dist);
+    if (sortedEntities.length > 0) {
+      const entityList = sortedEntities.slice(0, 10)
+        .map(e => `${e.name}(${e.dist}m)`)
+        .join(', ');
+      parts.push(`[实体] ${entityList}`);
+    } else {
+      parts.push('[实体] 无');
+    }
+
+    return parts.join('\n');
+  }
+
   async _lookAt({ x, y, z, player }) {
     if (player) {
       const target = this.bot.players[player]?.entity;
@@ -671,7 +797,7 @@ class QueryModule {
     if (!this.llm) return '联网搜索不可用（LLM 未初始化）';
 
     try {
-      const response = await this.llm.client.chat.completions.create({
+      const response = await this._searchClient.chat.completions.create({
         model: this.llm.model,
         messages: [
           {

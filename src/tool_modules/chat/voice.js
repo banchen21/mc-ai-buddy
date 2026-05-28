@@ -109,6 +109,10 @@ class VoiceModule {
     }
 
     this._playing = false;
+    // 检查是否在 drainQueue 期间有新消息入队
+    if (this._queue.length > 0) {
+      this._drainQueue();
+    }
   }
 
   async _speakOne(text) {
@@ -132,7 +136,7 @@ class VoiceModule {
     }
 
     fs.writeFileSync(filepath, Buffer.from(audioData, 'base64'));
-    this.bot.voicechat.sendAudio(filepath);
+    await this.bot.voicechat.sendAudio(filepath);
     console.log('[Voice] 🔊 ' + text.substring(0, 40));
   }
 

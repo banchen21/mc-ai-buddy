@@ -471,8 +471,11 @@ class InteractModule {
       new Vec3(0, 0, -1), // 北
     ];
 
+    let lastTargetPos = null;
+
     for (const face of faces) {
       const targetPos = ref.position.plus(face);
+      lastTargetPos = targetPos;
       const targetBlock = this.bot.blockAt(targetPos);
       if (
         targetBlock &&
@@ -483,8 +486,24 @@ class InteractModule {
           await this.bot.placeBlock(ref, face);
           return `放置了 ${block} 在 (${targetPos.x},${targetPos.y},${targetPos.z})`;
         } catch (err) {
+          // placeBlock 可能抛异常但方块实际已放置成功，等一小会再验证
+          await new Promise((r) => setTimeout(r, 150));
+          const verifyBlock = this.bot.blockAt(targetPos);
+          if (verifyBlock && verifyBlock.name !== "air" && verifyBlock.name !== "cave_air") {
+            return `放置了 ${block} 在 (${targetPos.x},${targetPos.y},${targetPos.z})`;
+          }
           continue; // 这个面不行，试下一个
         }
+      }
+    }
+
+    // 所有面都失败后，做最终验证：检查参照方块周围是否已经有新方块出现
+    await new Promise((r) => setTimeout(r, 200));
+    for (const face of faces) {
+      const checkPos = ref.position.plus(face);
+      const checkBlock = this.bot.blockAt(checkPos);
+      if (checkBlock && checkBlock.name !== "air" && checkBlock.name !== "cave_air") {
+        return `放置了 ${block} 在 (${checkPos.x},${checkPos.y},${checkPos.z})`;
       }
     }
 
