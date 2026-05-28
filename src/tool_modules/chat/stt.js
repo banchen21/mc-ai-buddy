@@ -191,8 +191,8 @@ class STTModule {
     });
 
     const msg = response.choices[0]?.message;
-    // content 为空时取 reasoning_content
-    return (msg?.content || msg?.reasoning_content || '').trim();
+    // 只取 content，reasoning_content 是模型的思考过程不是转写结果
+    return (msg?.content || '').trim();
   }
 }
 
