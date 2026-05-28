@@ -188,7 +188,7 @@ class Agent {
     });
     this.llm.history.push({
       role: "assistant",
-      content: "（已自动处理）",
+      content: `（已自动处理：${eventSummary}）`,
     });
     this.llm._trimHistory();
     if (this.llm._onHistoryChange) {

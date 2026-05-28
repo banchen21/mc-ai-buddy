@@ -24,15 +24,29 @@ class InteractModule {
         type: "function",
         function: {
           name: "dig",
-          description: "挖掘指定坐标的方块",
+          description: "挖掘指定坐标的方块，可传入多个坐标批量挖掘",
           parameters: {
             type: "object",
             properties: {
-              x: { type: "number" },
-              y: { type: "number" },
-              z: { type: "number" },
+              x: { type: "number", description: "单个方块 X 坐标" },
+              y: { type: "number", description: "单个方块 Y 坐标" },
+              z: { type: "number", description: "单个方块 Z 坐标" },
+              targets: {
+                type: "array",
+                description:
+                  "批量挖掘的坐标列表，如 [{x:1,y:2,z:3}, {x:4,y:5,z:6}]",
+                items: {
+                  type: "object",
+                  properties: {
+                    x: { type: "number" },
+                    y: { type: "number" },
+                    z: { type: "number" },
+                  },
+                  required: ["x", "y", "z"],
+                },
+              },
             },
-            required: ["x", "y", "z"],
+            required: [],
           },
         },
       },
@@ -40,16 +54,30 @@ class InteractModule {
         type: "function",
         function: {
           name: "place",
-          description: "在指定坐标旁边放置方块",
+          description: "在参照方块旁边放置方块，可传入多个参照坐标批量放置",
           parameters: {
             type: "object",
             properties: {
-              block: { type: "string" },
-              x: { type: "number" },
-              y: { type: "number" },
-              z: { type: "number" },
+              block: { type: "string", description: "要放置的方块名" },
+              x: { type: "number", description: "单个参照方块 X 坐标" },
+              y: { type: "number", description: "单个参照方块 Y 坐标" },
+              z: { type: "number", description: "单个参照方块 Z 坐标" },
+              targets: {
+                type: "array",
+                description:
+                  "批量放置的参照坐标列表，如 [{x:1,y:2,z:3}, {x:4,y:5,z:6}]",
+                items: {
+                  type: "object",
+                  properties: {
+                    x: { type: "number" },
+                    y: { type: "number" },
+                    z: { type: "number" },
+                  },
+                  required: ["x", "y", "z"],
+                },
+              },
             },
-            required: ["block", "x", "y", "z"],
+            required: ["block"],
           },
         },
       },
@@ -429,94 +457,138 @@ class InteractModule {
     return { toolName: null, toolItem: null, needTool: toolType };
   }
 
-  async _dig({ x, y, z }) {
+  async _dig({ x, y, z, targets }) {
     const { Vec3 } = require("vec3");
-    const block = this.bot.blockAt(new Vec3(x, y, z));
-    if (!block || block.name === "air") return "那里没有方块";
 
-    // 选择最佳工具
-    const tool = this._bestTool(block);
+    // 构建挖掘列表：单坐标或批量坐标
+    const list =
+      targets?.length > 0
+        ? targets.map((t) => ({ x: t.x, y: t.y, z: t.z }))
+        : x !== undefined
+          ? [{ x, y, z }]
+          : [];
 
-    if (tool) {
-      if (tool.toolItem) {
-        // 有工具 → 装备
+    if (list.length === 0) return "请提供要挖掘的坐标";
+
+    const results = [];
+    for (const pos of list) {
+      const block = this.bot.blockAt(new Vec3(pos.x, pos.y, pos.z));
+      if (!block || block.name === "air" || block.name === "cave_air") {
+        results.push(`(${pos.x},${pos.y},${pos.z}): 没有方块`);
+        continue;
+      }
+
+      const tool = this._bestTool(block);
+      if (tool?.toolItem) {
         await this.bot.equip(tool.toolItem, "hand");
+      }
+
+      await this.bot.lookAt(block.position.offset(0.5, 0.5, 0.5));
+      try {
+        await this.bot.dig(block);
+        results.push(
+          `挖掘了 ${block.displayName || block.name} (${pos.x},${pos.y},${pos.z})`,
+        );
+      } catch (err) {
+        results.push(`(${pos.x},${pos.y},${pos.z}) 挖掘失败: ${err.message}`);
       }
     }
 
-    // 先看向方块再挖
-    await this.bot.lookAt(block.position.offset(0.5, 0.5, 0.5));
-    try {
-      await this.bot.dig(block);
-      return `挖掘了 ${block.displayName || block.name}，请拾取掉落物`;
-    } catch (err) {
-      return `挖掘失败: ${err.message}`;
-    }
+    return results.join("；") + "，请拾取掉落物";
   }
 
-  async _place({ block, x, y, z }) {
-    const ref = this.bot.blockAt(new Vec3(x, y, z));
-    if (!ref) return "找不到参照方块";
+  async _place({ block, x, y, z, targets }) {
+    const { Vec3 } = require("vec3");
+
+    // 构建放置列表
+    const list =
+      targets?.length > 0
+        ? targets.map((t) => ({ x: t.x, y: t.y, z: t.z }))
+        : x !== undefined
+          ? [{ x, y, z }]
+          : [];
+
+    if (list.length === 0) return "请提供参照方块坐标";
+
     const item = this.bot.inventory.items().find((i) => i.name.includes(block));
     if (!item) return `背包没有 ${block}`;
-
     await this.bot.equip(item, "hand");
 
-    // 计算放置面：优先放在参照方块的上方，如果上方被占则尝试侧面
     const faces = [
-      new Vec3(0, 1, 0), // 上方
-      new Vec3(1, 0, 0), // 东
-      new Vec3(-1, 0, 0), // 西
-      new Vec3(0, 0, 1), // 南
-      new Vec3(0, 0, -1), // 北
+      new Vec3(0, 1, 0),
+      new Vec3(1, 0, 0),
+      new Vec3(-1, 0, 0),
+      new Vec3(0, 0, 1),
+      new Vec3(0, 0, -1),
     ];
 
-    let lastTargetPos = null;
+    const results = [];
+    for (const pos of list) {
+      const ref = this.bot.blockAt(new Vec3(pos.x, pos.y, pos.z));
+      if (!ref) {
+        results.push(`(${pos.x},${pos.y},${pos.z}): 找不到参照方块`);
+        continue;
+      }
 
-    for (const face of faces) {
-      const targetPos = ref.position.plus(face);
-      lastTargetPos = targetPos;
-      const targetBlock = this.bot.blockAt(targetPos);
-      if (
-        targetBlock &&
-        (targetBlock.name === "air" || targetBlock.name === "cave_air")
-      ) {
-        try {
-          await this.bot.lookAt(targetPos.offset(0.5, 0.5, 0.5));
-          await this.bot.placeBlock(ref, face);
-          return `放置了 ${block} 在 (${targetPos.x},${targetPos.y},${targetPos.z})`;
-        } catch (err) {
-          // placeBlock 可能抛异常但方块实际已放置成功，等一小会再验证
-          await new Promise((r) => setTimeout(r, 150));
-          const verifyBlock = this.bot.blockAt(targetPos);
-          if (verifyBlock && verifyBlock.name !== "air" && verifyBlock.name !== "cave_air") {
-            return `放置了 ${block} 在 (${targetPos.x},${targetPos.y},${targetPos.z})`;
+      let placed = false;
+      for (const face of faces) {
+        const targetPos = ref.position.plus(face);
+        const targetBlock = this.bot.blockAt(targetPos);
+        if (
+          targetBlock &&
+          (targetBlock.name === "air" || targetBlock.name === "cave_air")
+        ) {
+          try {
+            await this.bot.lookAt(targetPos.offset(0.5, 0.5, 0.5));
+            await this.bot.placeBlock(ref, face);
+            results.push(
+              `放置了 ${block} 在 (${targetPos.x},${targetPos.y},${targetPos.z})`,
+            );
+            placed = true;
+            break;
+          } catch {
+            await new Promise((r) => setTimeout(r, 150));
+            const verify = this.bot.blockAt(targetPos);
+            if (verify && verify.name !== "air" && verify.name !== "cave_air") {
+              results.push(
+                `放置了 ${block} 在 (${targetPos.x},${targetPos.y},${targetPos.z})`,
+              );
+              placed = true;
+              break;
+            }
           }
-          continue; // 这个面不行，试下一个
+        }
+      }
+
+      if (!placed) {
+        // 最终验证
+        await new Promise((r) => setTimeout(r, 200));
+        let found = false;
+        for (const face of faces) {
+          const checkPos = ref.position.plus(face);
+          const checkBlock = this.bot.blockAt(checkPos);
+          if (
+            checkBlock &&
+            checkBlock.name !== "air" &&
+            checkBlock.name !== "cave_air"
+          ) {
+            results.push(
+              `放置了 ${block} 在 (${checkPos.x},${checkPos.y},${checkPos.z})`,
+            );
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          results.push(`(${pos.x},${pos.y},${pos.z}): 周围没有空位`);
         }
       }
     }
 
-    // 所有面都失败后，做最终验证：检查参照方块周围是否已经有新方块出现
-    await new Promise((r) => setTimeout(r, 200));
-    for (const face of faces) {
-      const checkPos = ref.position.plus(face);
-      const checkBlock = this.bot.blockAt(checkPos);
-      if (checkBlock && checkBlock.name !== "air" && checkBlock.name !== "cave_air") {
-        return `放置了 ${block} 在 (${checkPos.x},${checkPos.y},${checkPos.z})`;
-      }
-    }
-
-    return `放置失败: 参照方块周围没有空位`;
+    return results.join("；");
   }
 
-  /**
-   * pillar_up — 搭方块上升
-   * 原理：跳起来 → 在空中往脚下放方块 → 站到方块上
-   * 重复 count 次
-   */
   async _pillarUp({ block, count = 1 }) {
-    // 先停止寻路，避免与 pathfinder 冲突
     this.bot.pathfinder?.setGoal(null);
 
     const item = this.bot.inventory.items().find((i) => i.name.includes(block));
@@ -524,36 +596,48 @@ class InteractModule {
 
     await this.bot.equip(item, "hand");
 
-    let placed = 0;
+    // 持续按住跳跃
+    this.bot.setControlState("jump", true);
+
     for (let i = 0; i < count; i++) {
-      // 1. 记录起跳前脚下的方块（作为放置参照面）
-      const feetPos = this.bot.entity.position.floored();
-      const refBlock = this.bot.blockAt(feetPos.offset(0, -1, 0));
+      const refBlock = this.bot.blockAt(
+        this.bot.entity.position.floored().offset(0, -1, 0),
+      );
       if (!refBlock || refBlock.name === "air" || refBlock.name === "cave_air") {
-        return `脚下没有方块可以参照，已搭了 ${placed} 格`;
-      }
-
-      // 2. 跳起来
-      this.bot.setControlState("jump", true);
-      await new Promise((r) => setTimeout(r, 250));
-
-      // 3. 看向脚下，在 refBlock 上方（即 bot 脚下位置）放方块
-      try {
-        await this.bot.lookAt(feetPos.offset(0.5, -0.5, 0.5));
-        // placeBlock: 在 refBlock 的上表面放置方块
-        await this.bot.placeBlock(refBlock, new Vec3(0, 1, 0));
-        placed++;
-      } catch (err) {
         this.bot.setControlState("jump", false);
-        return `搭方块失败: ${err.message}，已搭了 ${placed} 格`;
+        return `脚下没有方块，已搭了 ${i} 格`;
       }
 
-      // 4. 松开跳跃，等落地到新方块上
-      this.bot.setControlState("jump", false);
-      await new Promise((r) => setTimeout(r, 350));
+      // 持续发包放置，直到方块出现
+      const targetPos = refBlock.position.offset(0, 1, 0);
+      const start = Date.now();
+      let ok = false;
+      while (!ok && Date.now() - start < 3000) {
+        // 发包（不等确认）
+        try {
+          await this.bot._genericPlace(refBlock, new Vec3(0, 1, 0), {
+            forceLook: "ignore",
+            swingArm: "right",
+          });
+        } catch {}
+
+        // 检查方块是否出现
+        const check = this.bot.blockAt(targetPos);
+        if (check && check.name !== "air" && check.name !== "cave_air") {
+          ok = true;
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 50));
+      }
+
+      if (!ok) {
+        this.bot.setControlState("jump", false);
+        return `搭方块失败，已搭了 ${i} 格`;
+      }
     }
 
-    return `搭了 ${placed} 格 ${block}，上升了 ${placed} 格`;
+    this.bot.setControlState("jump", false);
+    return `搭了 ${count} 格 ${block}`;
   }
 
   async _attack({ target }) {

@@ -177,12 +177,30 @@ async function main() {
     try {
       console.log('[Auto] 🤔 自主决策：思考下一步...');
       autoAbort.cancelled = false;
+
+      // 注入最近 facts 摘要，让 LLM 知道刚才做了什么
+      const recentFacts = journal.recentFacts(20);
+      const factsSummary = recentFacts.length > 0
+        ? `\n\n## 最近行动记录\n${recentFacts.map((f, i) => {
+            // 截断过长的 fact（如 scan_surroundings 返回的方块列表）
+            const text = f.length > 200 ? f.substring(0, 200) + '...' : f;
+            return `${i + 1}. ${text}`;
+          }).join('\n')}\n\n请根据以上记录，决定下一步行动。避免重复已完成的操作。`
+        : '';
+
       const result = await agent.handle('system',
-        '请自行决策',
+        '请自行决策。' + factsSummary,
         { abortSignal: autoAbort }
       );
       if (result?.reply) {
         messageModule.send(result.reply);
+      }
+      // 记录自主决策的工具结果到日志
+      if (journal && result?.results?.length > 0) {
+        for (const r of result.results) {
+          journal.remember(`[自动] ${r}`);
+        }
+        journal.incStat('autoActions', result.results.length);
       }
       // 清理自主决策产生的 history（不污染对话记忆）
       // stripToolHistory 会保留纯文本 user/assistant，但自主决策中

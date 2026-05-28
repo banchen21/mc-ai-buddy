@@ -61,9 +61,8 @@ class Journal {
   /** 持久化到磁盘 */
   _save() {
     this.data.updatedAt = new Date().toISOString();
-    let now = Date.now();
     try {
-      fs.writeFileSync(this._file, now.toString() + JSON.stringify(this.data, null, 2));
+      fs.writeFileSync(this._file, JSON.stringify(this.data, null, 2));
     } catch (err) {
       console.error(`[Journal] ❌ 保存失败: ${err.message}`);
     }
