@@ -1,5 +1,5 @@
 /**
- * MC AI Buddy — Mineflayer + DeepSeek LLM
+ * MC AI Buddy — Mineflayer + OpenAI-compatible LLM
  */
 
 const mineflayer = require('mineflayer');
@@ -17,6 +17,8 @@ const { MoveModule } = require('./src/tool_modules/action/move');
 const { InteractModule } = require('./src/tool_modules/action/interact');
 const { CraftModule } = require('./src/tool_modules/action/craft');
 const { PassiveModule } = require('./src/tool_modules/passive/passive');
+const { VoiceModule } = require('./src/tool_modules/chat/voice');
+const { STTModule } = require('./src/tool_modules/chat/stt');
 
 // ===== 全局状态 =====
 let globalReconnectCount = 0;
@@ -41,8 +43,8 @@ async function main() {
   });
 
   // ===== 初始化核心模块 =====
-  llm = new LLM(config.deepseek);
-  agent = new Agent(llm, { maxRounds: config.deepseek.maxRounds ?? 5 });
+  llm = new LLM(config.llm);
+  agent = new Agent(llm, { maxRounds: config.llm.maxRounds ?? 5 });
   logger.attach(bot);
   bot.loadPlugin(pathfinder.pathfinder);
 
@@ -63,13 +65,18 @@ async function main() {
   messageModule.init();
   deps.messageModule = messageModule;
 
+  // ===== 初始化语音模块 =====
+  const voiceModule = new VoiceModule(bot, deps);
+  voiceModule.init();
+  deps.voiceModule = voiceModule;
+
   // ===== 初始化行为模块（Agent 模式） =====
   actionModule = new ActionModule(bot, deps);
 
   // 注册工具到 Agent
   agent.registerModule(new QueryModule(bot, deps));
   agent.registerModule(new MoveModule(bot, deps));
-  agent.registerModule(new InteractModule(bot));
+  agent.registerModule(new InteractModule(bot, deps));
   agent.registerModule(new CraftModule(bot));
   const memoryModule = new MemoryModule(bot, deps);
   memoryModule.init();
@@ -78,10 +85,20 @@ async function main() {
   // 注入人格到 Agent
   agent.setPersona(messageModule._persona);
 
-  // 中间回复实时发送到游戏
+  // 中间回复实时发送到游戏 + 语音
   agent._onChat = (msg) => {
     messageModule.send(msg);
+    voiceModule.speak(msg);
   };
+
+  // ===== 初始化 STT 语音识别 =====
+  const sttModule = new STTModule(bot, deps);
+  sttModule.init();
+  sttModule.onTranscription(async (text, playerName) => {
+    const result = await handleUserInput('voice', playerName, text);
+    return result;
+  });
+  deps.sttModule = sttModule;
 
   // ===== 初始化被动模块（事件驱动，不经过 LLM） =====
   const passiveModule = new PassiveModule(bot, deps);
@@ -90,26 +107,62 @@ async function main() {
 
   // 处理器链：action 统一处理（工具调用 + 纯聊天）
   messageModule.use(async (username, message) => {
-    // 玩家发消息时暂停自主决策
+    return await handleUserInput('text', username, message);
+  });
+
+  // ===== 优先级抢占：文字 > 语音 > 自主决策 =====
+  let currentInteraction = null; // { type: 'text'|'voice', abort: { cancelled: false } }
+
+  async function handleUserInput(type, username, message) {
+    // 如果当前正在处理文字消息，语音不能抢占
+    if (currentInteraction && currentInteraction.type === 'text' && type === 'voice') {
+      console.log(`[Input] 🔇 语音忽略（文字消息处理中）`);
+      return false;
+    }
+
+    // 打断当前交互（文字打断语音或自主决策，语音打断语音或自主决策）
+    if (currentInteraction) {
+      currentInteraction.abort.cancelled = true;
+      console.log(`[Input] ⏹️ 打断当前 ${currentInteraction.type} 任务`);
+    }
+
+    const abort = { cancelled: false };
+    currentInteraction = { type, abort };
+
+    // 同时打断自主决策
+    autoAbort.cancelled = true;
     if (autoDecisionTimer) {
       clearTimeout(autoDecisionTimer);
       autoDecisionTimer = null;
     }
-    const result = await actionModule.handleCommand(username, message);
-    // 处理完后延迟重启自主决策
-    if (config.autoDecision?.enabled && !autoDecisionRunning) {
-      autoDecisionTimer = setTimeout(autoDecisionLoop, 10000);
+
+    try {
+      const result = await actionModule.handleCommand(username, message, { abortSignal: abort });
+      return result;
+    } finally {
+      if (currentInteraction?.abort === abort) {
+        currentInteraction = null;
+      }
+      autoAbort.cancelled = false;
+      if (config.autoDecision?.enabled && !autoDecisionRunning) {
+        autoDecisionTimer = setTimeout(autoDecisionLoop, 10000);
+      }
     }
-    return result;
-  });
+  }
 
   // ===== 自主决策循环 =====
   let autoDecisionRunning = false;
   let autoDecisionTimer = null;
+  const autoAbort = { cancelled: false };
 
   async function autoDecisionLoop() {
     if (!config.autoDecision?.enabled) return;
     if (autoDecisionRunning) return;
+    // 玩家交互中或语音处理中，等空闲再启动
+    if (currentInteraction) {
+      autoDecisionTimer = setTimeout(autoDecisionLoop, 5000);
+      return;
+    }
 
     // 检查是否有活跃的 pathfinder 目标（跟随中等）
     const hasActiveGoal = bot.pathfinder?.goal && !bot.pathfinder?.goal?.reached;
@@ -123,7 +176,8 @@ async function main() {
     autoDecisionRunning = true;
     try {
       console.log('[Auto] 🤔 自主决策：思考下一步...');
-      const result = await agent.handle('system', '请自主决定下一步行动');
+      autoAbort.cancelled = false;
+      const result = await agent.handle('system', '请自主决定下一步行动', { abortSignal: autoAbort });
       if (result?.reply) {
         console.log(`\x1b[36m[Auto]\x1b[0m \x1b[33m${result.reply}\x1b[0m`);
       }

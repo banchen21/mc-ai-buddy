@@ -1,7 +1,5 @@
 /**
- * LLM 统一入口 — 封装 DeepSeek API
- * 统一方法：同一次请求同时支持文本回复 + Tool Calls
- * 共享一套 history，适配 KV Cache
+ * LLM 统一入口 — OpenAI 兼容 API 封装
  */
 const OpenAI = require("openai");
 const fs = require("fs");
@@ -20,47 +18,26 @@ function logError(msg) {
 
 class LLM {
   constructor(config) {
-    const baseURL = config.useStrictTools
-      ? config.betaBaseUrl || "https://api.deepseek.com/beta"
-      : config.baseUrl;
-
     this.client = new OpenAI({
       apiKey: config.apiKey,
-      baseURL,
+      baseURL: config.baseUrl,
     });
     this.model = config.model || "deepseek-chat";
-    this.useStrictTools = config.useStrictTools !== false;
     this.maxTokens = config.maxTokens || 300;
     this.temperature = config.temperature || 0.7;
 
-    /**
-     * 统一对话历史
-     * 格式: [{ role, content, name?, tool_calls?, tool_call_id? }]
-     * 包含 user / assistant / tool 三种角色
-     */
+    /** 对话历史 [{ role, content, name?, tool_calls?, tool_call_id? }] */
     this.history = [];
     this.maxHistory = config.maxHistory || 20;
-
-    /** 思考模式 */
-    this.thinkingMode = config.thinkingMode || "enabled";
-  }
-
-  /** 获取 extra_body（思考模式控制） */
-  _extraBody() {
-    if (this.thinkingMode === "disabled") {
-      return { thinking: { type: "disabled" } };
-    }
-    return {};
   }
 
   // ===== 统一对话接口 =====
 
   /**
-   * 统一对话 — 同时支持文本回复 + Tool Calls
-   * @param {string} systemPrompt — 系统提示（人格设定等）
-   * @param {string} userMessage — 用户消息
-   * @param {string} [username] — 用户名
-   * @param {array}  [tools] — 可选工具定义
+   * @param {string} systemPrompt
+   * @param {string} userMessage
+   * @param {string} [username]
+   * @param {array}  [tools]
    * @returns {{ reply: string, tool_calls: array|null }}
    */
   async send(systemPrompt, userMessage, username = "", tools = null) {
@@ -82,17 +59,10 @@ class LLM {
         messages,
         max_tokens: this.maxTokens,
         temperature: this.temperature,
-        extra_body: this._extraBody(),
       };
 
-      // 有工具时传入 tools
       if (tools && tools.length > 0) {
-        params.tools = this.useStrictTools
-          ? tools.map((t) => ({
-              ...t,
-              function: { ...t.function, strict: true },
-            }))
-          : tools;
+        params.tools = tools;
         params.tool_choice = "auto";
       }
 
@@ -100,7 +70,6 @@ class LLM {
       const msg = response.choices[0].message;
       const usage = response.usage || {};
 
-      // 追加到统一历史
       this.history.push({
         role: "user",
         content: userMessage,
@@ -109,10 +78,8 @@ class LLM {
       this.history.push(msg);
       this._trimHistory();
 
-      // 自动保存到 journal
       if (this._onHistoryChange) this._onHistoryChange(this.history);
 
-      // KV Cache 日志
       const hit = usage.prompt_cache_hit_tokens || 0;
       const total = usage.prompt_tokens || 0;
       const hitRate = total > 0 ? ((hit / total) * 100).toFixed(0) : 0;
@@ -148,7 +115,6 @@ class LLM {
       logError(`[LLM] ${err.message} status:${err.status}`);
       if (err.status === 400) {
         this.history = [];
-        // 重试时不传 tools（可能是 tools 格式问题）
         return this.send(systemPrompt, userMessage, username, null);
       }
       return { reply: null, tool_calls: null };
@@ -171,17 +137,14 @@ class LLM {
 
   /**
    * 撤销最近一次 send() 追加的历史（user + assistant）
-   * 用于 action 判断是纯聊天时回退，交给消息模块处理
    */
   undoLastSend() {
-    // 移除 assistant 消息
     if (
       this.history.length > 0 &&
       this.history[this.history.length - 1].role === "assistant"
     ) {
       this.history.pop();
     }
-    // 移除 user 消息
     if (
       this.history.length > 0 &&
       this.history[this.history.length - 1].role === "user"
@@ -192,7 +155,6 @@ class LLM {
 
   // ===== 历史管理 =====
 
-  /** 清理孤立的 tool_calls */
   _cleanOrphanToolCalls() {
     const cleaned = [];
     let pending = false;
@@ -214,7 +176,6 @@ class LLM {
     this.history = cleaned;
   }
 
-  /** 裁剪历史，不拆散 tool_calls ↔ tool 配对 */
   _trimHistory() {
     if (this.history.length <= this.maxHistory) return;
 
@@ -252,7 +213,6 @@ class LLM {
 
   /**
    * 移除所有 tool_calls / tool 消息，只保留纯文本 user/assistant 对话
-   * 用于 maxRounds 耗尽后清理上下文，避免 LLM 继续伪造 tool_calls
    */
   stripToolHistory() {
     this.history = this.history.filter(

@@ -13,8 +13,9 @@ class InteractModule {
     shears: "剪刀",
   };
 
-  constructor(bot) {
+  constructor(bot, deps = {}) {
     this.bot = bot;
+    this.messageModule = deps.messageModule || null;
   }
 
   getToolDefs() {
@@ -781,8 +782,12 @@ class InteractModule {
   }
 
   async _sendChat({ message }) {
-    const clean = message.substring(0, 80);
-    this.bot.chat(clean);
+    const clean = message.substring(0, 200).trim();
+    if (this.messageModule) {
+      await this.messageModule.send(clean);
+    } else {
+      this.bot.chat(clean);
+    }
     return `发送了: ${clean}`;
   }
 }

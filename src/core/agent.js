@@ -74,7 +74,7 @@ class Agent {
     const toolNames = this._tools.map(t => t.function.name).join('、');
     return (this._persona || '你是 Minecraft 中的 AI 助手。') +
       `\n\n当前对话玩家: ${username}\n可用工具: ${toolNames}` +
-      `\n规则：问状态→调查询工具，给指令→调动作工具，纯聊天→不调工具。给物品前先走到玩家旁边。回复256字内。`;
+      `\n规则：问状态→调查询工具，给指令→调动作工具，纯聊天→不调工具直接文字回复。给物品前先走到玩家旁边。`;
   }
 
   // ===== 主入口 =====
@@ -108,12 +108,14 @@ class Agent {
    * @param {string} message
    * @returns {{ reply: string, rounds: number, results: string[] } | null}
    */
-  async handle(username, message) {
+  async handle(username, message, opts = {}) {
     if (this._tools.length === 0) return null;
 
     const system = this._buildSystemPrompt(username);
     const orch = this._getOrchestrator();
-    return orch.run(system, message, username, this._tools);
+    // 聊天模式限制轮次加快响应，自主模式保留完整轮次
+    const maxRounds = username === 'system' ? this._maxRounds : Math.min(this._maxRounds, 5);
+    return orch.run(system, message, username, this._tools, maxRounds, opts.abortSignal);
   }
 }
 

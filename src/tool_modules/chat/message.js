@@ -16,6 +16,9 @@ class MessageModule {
     this._queue = [];
     this._processing = false;
 
+    /** 消息去重：记录最后一次发送的消息和时间 */
+    this._lastSent = { msg: '', time: 0 };
+
     /** 消息处理器链 */
     this._handlers = [];
 
@@ -101,14 +104,18 @@ class MessageModule {
     }
   }
 
-  /** 发送消息 */
+  /** 发送消息（5秒内相同消息去重） */
   async send(msg) {
-    const clean = msg
-      .substring(0, 200);
-    if (clean) {
-      this.bot.chat(clean);
-      logger.chat(this.bot.username, clean);
+    const clean = msg.substring(0, 200).trim();
+    if (!clean) return;
+    // 5 秒内相同消息跳过
+    const now = Date.now();
+    if (clean === this._lastSent.msg && now - this._lastSent.time < 5000) {
+      return;
     }
+    this._lastSent = { msg: clean, time: now };
+    this.bot.chat(clean);
+    logger.chat(this.bot.username, clean);
   }
 
   /** 发送私聊 */

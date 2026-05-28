@@ -10,10 +10,14 @@ class ActionModule {
     this.agent = deps.agent;
     this.memory = deps.journal;
     this.messageModule = deps.messageModule;
+    this.voiceModule = deps.voiceModule;
   }
 
-  async handleCommand(username, message) {
+  async handleCommand(username, message, opts = {}) {
     if (!this.agent) return false;
+
+    // 检查是否已被更高优先级的消息打断
+    if (opts.abortSignal?.cancelled) return false;
 
     // 记录对话
     if (this.memory) {
@@ -22,7 +26,7 @@ class ActionModule {
     }
 
     try {
-      const result = await this.agent.handle(username, message);
+      const result = await this.agent.handle(username, message, opts);
       if (!result) return false;
 
       // 记录动作到记忆
@@ -33,8 +37,11 @@ class ActionModule {
         this.memory.incStat('actions', result.results.length);
       }
 
-      // 发送最终回复（走 messageModule 过滤）
+      // 发送最终回复（文本和语音并行，缩小间隔）
       if (result.reply) {
+        if (this.voiceModule) {
+          this.voiceModule.speak(result.reply);
+        }
         if (this.messageModule) {
           await this.messageModule.send(result.reply);
         } else {

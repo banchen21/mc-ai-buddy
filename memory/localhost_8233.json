@@ -1,86 +1,22 @@
-1779652691224{
+1779977866209{
   "server": "localhost_8233",
-  "createdAt": "2026-05-24T19:51:51.229Z",
-  "updatedAt": "2026-05-24T19:58:11.224Z",
+  "createdAt": "2026-05-28T14:17:42.422Z",
+  "updatedAt": "2026-05-28T14:17:46.209Z",
   "players": {
     "banchen21": {
-      "firstSeen": 1779652690164,
-      "lastSeen": 1779652690164,
+      "firstSeen": 1779977866208,
+      "lastSeen": 1779977866208,
       "notes": ""
     }
   },
   "facts": [
     {
-      "text": "[对话] banchen21: 不要了",
-      "ts": "2026-05-24T19:58:10.164Z"
+      "text": "[对话] banchen21: 你在脚下踮一个方块",
+      "ts": "2026-05-28T14:17:46.208Z"
     }
   ],
   "locations": {},
   "stats": {
     "chats": 1
-  },
-  "chatHistory": [
-    {
-      "role": "assistant",
-      "content": "（已自动处理）"
-    },
-    {
-      "role": "user",
-      "content": "请自主决定下一步行动",
-      "name": "system"
-    },
-    {
-      "role": "assistant",
-      "content": "开始探索新区域了！看看前面有什么好风景~"
-    },
-    {
-      "role": "assistant",
-      "content": "（已自动处理）"
-    },
-    {
-      "role": "user",
-      "content": "请自主决定下一步行动",
-      "name": "system"
-    },
-    {
-      "role": "assistant",
-      "content": "下雨天最适合散步了！附近有水，说不定是个小湖或者河流。让我四处转转，看看这片地方长什么样，顺便找找有没有值得勘探的资源。"
-    },
-    {
-      "role": "user",
-      "content": "请自主决定下一步行动",
-      "name": "system"
-    },
-    {
-      "role": "assistant",
-      "content": "嘿！你好啊 banchen21，没想到在这儿遇到你！我正在附近探索呢，看到你在这边就过来打个招呼。有啥需要帮忙的吗？我身上带了些木头和工具，要一起搞点建设或者挖矿吗？"
-    },
-    {
-      "role": "user",
-      "content": "请自主决定下一步行动",
-      "name": "system"
-    },
-    {
-      "role": "assistant",
-      "content": "嘿，banchen21，我在你旁边呢！现在下着雨，不过白天还长着。我看到咱们有床、有工具，开局挺好的。\n\n要不我整理整理物资，或者咱一起干点啥？你说话我就听着呢！"
-    },
-    {
-      "role": "user",
-      "content": "请自主决定下一步行动",
-      "name": "system"
-    },
-    {
-      "role": "assistant",
-      "content": "周围有另一位玩家在附近，下着小雨，我先打个招呼看看情况。\n\n嘿，banchen21！我在你附近呢，坐标 (-21, 72, 43)，下雨天窝在这有点无聊。我背包里有些基础物资，圆石、木头、熔炉都有，你想一起干点啥不？比如去挖矿找点铁，或者搞个基地？我还没穿护甲呢，出去浪有点虚哈哈。"
-    },
-    {
-      "role": "user",
-      "content": "不要了",
-      "name": "banchen21"
-    },
-    {
-      "role": "assistant",
-      "content": "哈哈，好吧，那我先歇会儿。有什么需要再叫我，随时都在！"
-    }
-  ]
+  }
 }
