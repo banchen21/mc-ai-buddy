@@ -16,6 +16,7 @@ class InteractModule {
   constructor(bot, deps = {}) {
     this.bot = bot;
     this.messageModule = deps.messageModule || null;
+    this.voiceModule = deps.voiceModule || null;
   }
 
   getToolDefs() {
@@ -133,10 +134,13 @@ class InteractModule {
         type: "function",
         function: {
           name: "equip",
-          description: "装备指定物品到手上",
+          description: "装备指定物品到手上，可指定主手或副手",
           parameters: {
             type: "object",
-            properties: { item: { type: "string" } },
+            properties: {
+              item: { type: "string", description: "物品名" },
+              slot: { type: "string", description: "hand（主手，默认）或 off-hand（副手）" },
+            },
             required: ["item"],
           },
         },
@@ -664,13 +668,15 @@ class InteractModule {
     return `给了 ${player} ${item} x${count}`;
   }
 
-  async _equip({ item }) {
+  async _equip({ item, slot = 'hand' }) {
     const invItem = this.bot.inventory
       .items()
       .find((i) => i.name.includes(item));
     if (!invItem) return `背包没有 ${item}`;
-    await this.bot.equip(invItem, "hand");
-    return `装备了 ${item}`;
+    const dest = slot === 'off-hand' ? 'off-hand' : 'hand';
+    await this.bot.equip(invItem, dest);
+    const slotName = dest === 'off-hand' ? '副手' : '主手';
+    return `装备了 ${item} 到${slotName}`;
   }
 
   async _drop() {
@@ -892,6 +898,9 @@ class InteractModule {
       await this.messageModule.send(clean);
     } else {
       this.bot.chat(clean);
+    }
+    if (this.voiceModule) {
+      this.voiceModule.speak(clean);
     }
     return `发送了: ${clean}`;
   }

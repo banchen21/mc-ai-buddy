@@ -2,6 +2,9 @@
  * MC AI Buddy — Mineflayer + OpenAI-compatible LLM
  */
 
+// 提高 EventEmitter 上限，避免 mineflayer 内部 blockUpdate 监听器累积警告
+require('events').EventEmitter.defaultMaxListeners = 50;
+
 const mineflayer = require('mineflayer');
 const pathfinder = require('mineflayer-pathfinder');
 const config = require('./config.json');
@@ -43,6 +46,7 @@ async function main() {
   });
 
   // ===== 初始化核心模块 =====
+  logger.configure(config);
   llm = new LLM(config.llm);
   agent = new Agent(llm, { maxRounds: config.llm.maxRounds ?? 50 });
   logger.attach(bot);
@@ -155,6 +159,28 @@ async function main() {
   let autoDecisionTimer = null;
   const autoAbort = { cancelled: false };
 
+  // 敌对生物列表（与 combat.js 保持一致）
+  const HOSTILE_MOBS = [
+    'zombie', 'skeleton', 'creeper', 'spider', 'cave_spider',
+    'enderman', 'witch', 'slime', 'phantom', 'drowned',
+    'husk', 'stray', 'blaze', 'ghast', 'wither_skeleton',
+    'hoglin', 'piglin', 'piglin_brute', 'zoglin',
+    'vindicator', 'pillager', 'evoker', 'ravager', 'vex',
+    'guardian', 'elder_guardian', 'warden',
+  ];
+
+  function getNearbyHostiles(radius) {
+    const entities = Object.values(bot.entities || {});
+    const pos = bot.entity?.position;
+    if (!pos) return [];
+    return entities.filter(e => {
+      if (e === bot.entity) return false;
+      const name = (e.name || '').toLowerCase();
+      if (!HOSTILE_MOBS.some(m => name.includes(m))) return false;
+      return pos.distanceTo(e.position) <= radius;
+    });
+  }
+
   async function autoDecisionLoop() {
     if (!config.autoDecision?.enabled) return;
     if (autoDecisionRunning) return;
@@ -188,17 +214,31 @@ async function main() {
           }).join('\n')}\n\n请根据以上记录，决定下一步行动。避免重复已完成的操作。`
         : '';
 
+      // 检测附近敌对生物，注入战斗引导
+      const nearbyHostiles = getNearbyHostiles(16);
+      let combatHint = '';
+      if (nearbyHostiles.length > 0) {
+        const hp = Math.round(bot.health);
+        const names = nearbyHostiles.slice(0, 5).map(e => e.name || e.displayName).join('、');
+        if (hp >= 10) {
+          combatHint = `\n\n## ⚔️ 附近有敌对生物: ${names}。你的血量充足 (${hp}/20)，应该主动攻击它们！先 equip 武器，然后走过去 attack。`;
+        } else {
+          combatHint = `\n\n## ⚠️ 附近有敌对生物: ${names}，但你血量偏低 (${hp}/20)，建议先保持距离或逃跑。`;
+        }
+      }
+
       const result = await agent.handle('system',
-        '请自行决策。' + factsSummary,
+        '请自行决策。' + factsSummary + combatHint,
         { abortSignal: autoAbort }
       );
       if (result?.reply) {
         messageModule.send(result.reply);
+        voiceModule.speak(result.reply);
       }
       // 记录自主决策的工具结果到日志
       if (journal && result?.results?.length > 0) {
         for (const r of result.results) {
-          journal.remember(`[自动] ${r}`);
+          journal.remember('system', `[自动] ${r}`);
         }
         journal.incStat('autoActions', result.results.length);
       }
@@ -235,6 +275,10 @@ async function main() {
     // 初始化 Pathfinder Movements（spawn 后 bot.pathfinder 才可用）
     const mcData = require('minecraft-data')(bot.version);
     const movements = new pathfinder.Movements(bot, mcData);
+    // 启用跳搭和跑酷，让寻路能处理复杂地形
+    movements.allowParkour = true;
+    movements.allowSprinting = true;
+    movements.canDig = true;
     bot.pathfinder.setMovements(movements);
     deps.movements = movements;
 
@@ -286,7 +330,7 @@ async function main() {
 
     // 记录到日志
     if (journal) {
-      journal.remember(`[死亡] 位置: (${loc})`);
+      journal.remember('system', `[死亡] 位置: (${loc})`);
       journal.incStat('deaths');
     }
   });
@@ -301,7 +345,7 @@ async function main() {
       agent.injectEvent(`bot 已重生，当前位置: (${loc})。背包已清空，需要捡回死亡掉落的物品。`);
     }
     if (journal) {
-      journal.remember(`[重生] 位置: (${loc})`);
+      journal.remember('system', `[重生] 位置: (${loc})`);
     }
   });
 

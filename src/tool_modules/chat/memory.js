@@ -1,10 +1,7 @@
 /**
- * 记忆工具模块 — LLM 可主动调用的记忆读写工具
+ * 记忆工具模块 — LLM 可主动调用的长期记忆
  *
- * 与 journal（日志记忆）分离：
- *   - journal: 自动记录事件/统计/对话历史持久化
- *   - memory:  LLM 主动写入/查询的关键信息（知识、计划、偏好等）
- *
+ * 存储为纯文本列表，启动时以 assistant 身份注入到对话历史中。
  * 存储：内存中，同时持久化到 memory/<host>_<port>_memory.json
  */
 const fs = require('fs');
@@ -16,8 +13,9 @@ class MemoryModule {
   constructor(bot, deps) {
     this.bot = bot;
     this.config = deps.config;
+    this.agent = deps.agent;
 
-    /** 记忆条目 [{ key, value, ts }] */
+    /** 记忆条目 [{ text, ts }] */
     this._entries = [];
 
     /** 文件路径 */
@@ -37,7 +35,7 @@ class MemoryModule {
     if (fs.existsSync(this._file)) {
       try {
         this._entries = JSON.parse(fs.readFileSync(this._file, 'utf-8'));
-        console.log(`[Memory] 📂 已加载记忆: ${this._entries.length} 条`);
+        console.log(`[Memory] 📂 已加载长期记忆: ${this._entries.length} 条`);
       } catch {
         console.log(`[Memory] ⚠️ 记忆文件损坏，重新创建`);
         this._entries = [];
@@ -47,6 +45,22 @@ class MemoryModule {
       this._save();
       console.log(`[Memory] 🆕 新记忆文件: ${safeName}_memory.json`);
     }
+
+    // 将长期记忆注入到 LLM 对话历史（以 assistant 身份）
+    this._injectToHistory();
+  }
+
+  /** 将长期记忆注入 LLM 对话历史 */
+  _injectToHistory() {
+    if (!this.agent?.llm || this._entries.length === 0) return;
+    const summary = this._entries
+      .map((e, i) => `${i + 1}. ${e.text}`)
+      .join('\n');
+    this.agent.llm.history.push({
+      role: 'assistant',
+      content: `[长期记忆]\n${summary}`,
+    });
+    console.log(`[Memory] 📥 已注入 ${this._entries.length} 条长期记忆到对话`);
   }
 
   _save() {
@@ -65,14 +79,13 @@ class MemoryModule {
         type: 'function',
         function: {
           name: 'remember',
-          description: '记住一条重要信息（知识、计划、偏好等），之后可以通过 recall 查询',
+          description: '记住一条重要信息（知识、计划、偏好等），之后会自动出现在对话上下文中',
           parameters: {
             type: 'object',
             properties: {
-              key: { type: 'string', description: '记忆的键/主题，如 "base_location", "plan", "preference"' },
-              value: { type: 'string', description: '记忆的内容' },
+              text: { type: 'string', description: '要记住的内容' },
             },
-            required: ['key', 'value'],
+            required: ['text'],
           },
         },
       },
@@ -80,27 +93,21 @@ class MemoryModule {
         type: 'function',
         function: {
           name: 'recall',
-          description: '查询之前记住的信息，支持按 key 精确查询或模糊搜索',
-          parameters: {
-            type: 'object',
-            properties: {
-              key: { type: 'string', description: '要查询的 key（留空则返回所有记忆摘要）' },
-            },
-            required: [],
-          },
+          description: '查看所有长期记忆',
+          parameters: { type: 'object', properties: {}, required: [] },
         },
       },
       {
         type: 'function',
         function: {
           name: 'forget',
-          description: '删除一条不再需要的记忆',
+          description: '删除一条不再需要的记忆（按序号）',
           parameters: {
             type: 'object',
             properties: {
-              key: { type: 'string', description: '要删除的记忆 key' },
+              index: { type: 'number', description: '要删除的记忆序号（从 1 开始）' },
             },
-            required: ['key'],
+            required: ['index'],
           },
         },
       },
@@ -110,21 +117,15 @@ class MemoryModule {
   getExecutors() {
     return {
       remember: (p) => this._remember(p),
-      recall: (p) => this._recall(p),
+      recall: () => this._recall(),
       forget: (p) => this._forget(p),
     };
   }
 
   // ===== 实现 =====
 
-  _remember({ key, value }) {
-    // 同 key 则覆盖
-    const idx = this._entries.findIndex(e => e.key === key);
-    if (idx >= 0) {
-      this._entries[idx] = { key, value, ts: new Date().toISOString() };
-    } else {
-      this._entries.push({ key, value, ts: new Date().toISOString() });
-    }
+  _remember({ text }) {
+    this._entries.push({ text, ts: new Date().toISOString() });
 
     // 最多 100 条
     if (this._entries.length > 100) {
@@ -132,33 +133,32 @@ class MemoryModule {
     }
 
     this._save();
-    return `已记住: ${key}`;
-  }
 
-  _recall({ key }) {
-    if (!key) {
-      // 返回所有 key 摘要
-      if (this._entries.length === 0) return '暂无记忆';
-      const keys = this._entries.map(e => `${e.key}: ${e.value.substring(0, 40)}...`).join('\n');
-      return `记忆列表 (${this._entries.length} 条):\n${keys}`;
+    // 同步注入到 LLM 对话历史
+    if (this.agent?.llm) {
+      this.agent.llm.history.push({
+        role: 'assistant',
+        content: `[新记忆] ${text}`,
+      });
     }
 
-    // 精确匹配
-    const exact = this._entries.find(e => e.key === key);
-    if (exact) return `[${key}]: ${exact.value}`;
-
-    // 模糊匹配
-    const fuzzy = this._entries.filter(e => e.key.includes(key) || e.value.includes(key));
-    if (fuzzy.length === 0) return `未找到关于 "${key}" 的记忆`;
-    return fuzzy.map(e => `[${e.key}]: ${e.value}`).join('\n');
+    return `已记住 (第${this._entries.length}条)`;
   }
 
-  _forget({ key }) {
-    const idx = this._entries.findIndex(e => e.key === key);
-    if (idx < 0) return `未找到记忆: ${key}`;
-    this._entries.splice(idx, 1);
+  _recall() {
+    if (this._entries.length === 0) return '暂无长期记忆';
+    return this._entries
+      .map((e, i) => `${i + 1}. ${e.text}`)
+      .join('\n');
+  }
+
+  _forget({ index }) {
+    const i = index - 1;
+    if (i < 0 || i >= this._entries.length) return `无效序号: ${index}`;
+    const removed = this._entries[i].text;
+    this._entries.splice(i, 1);
     this._save();
-    return `已删除记忆: ${key}`;
+    return `已删除: ${removed}`;
   }
 }
 

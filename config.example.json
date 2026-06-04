@@ -26,6 +26,10 @@
     "duplicateLoginDelay": 30000,
     "normalDelay": 5000
   },
+  "logging": {
+    "activityLog": true,
+    "activityJsonl": true
+  },
   "voice": {
     "enabled": true,
     "apiKey": "sk-your-mimo-api-key",

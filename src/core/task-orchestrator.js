@@ -41,8 +41,10 @@ class TaskOrchestrator {
 
     // 纯聊天 → 写入持久历史并直接返回
     if (!result.tool_calls?.length) {
+      const userMsg = { role: 'user', content: userMessage };
+      if (username === 'system') userMsg.name = 'system';
       this.llm.history.push(
-        { role: 'user', content: userMessage },
+        userMsg,
         { role: 'assistant', content: result.reply || '' },
       );
       this.llm._trimHistory();
@@ -145,8 +147,10 @@ class TaskOrchestrator {
       if (finalResult.tool_calls?.length > 0) reply = '好的';
     } else {
       this.llm.stripToolHistory();
+      const userMsg = { role: 'user', content: userMessage };
+      if (username === 'system') userMsg.name = 'system';
       this.llm.history.push(
-        { role: 'user', content: userMessage },
+        userMsg,
         { role: 'assistant', content: reply },
       );
       this.llm._trimHistory();

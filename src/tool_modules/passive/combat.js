@@ -87,7 +87,7 @@ class CombatPassive {
       const hp = Math.round(this.ctx.bot.health);
       if (hp > 0 && hp <= 6 && Date.now() - lastWarn > 10000) {
         lastWarn = Date.now();
-        this.ctx.memory?.remember(`[危险] 血量降至 ${hp}`);
+        this.ctx.memory?.remember('system', `[危险] 血量降至 ${hp}`);
       }
     });
   }
@@ -113,7 +113,6 @@ class CombatPassive {
 
       if (threats.length >= 3) {
         const names = threats.map(t => t.displayName || t.name).join(', ');
-        this.ctx.say(`⚠️ ${threats.length} 只怪物在附近！`);
         this.ctx.injectEvent(`${threats.length} 只怪物在附近: ${names}`);
       }
     });
@@ -151,11 +150,14 @@ class CombatPassive {
   _tryDodge() {
     // 防止重复启动
     if (this._dodging) return;
+    // 冷却：5 秒内不重复触发逃跑
+    if (Date.now() - (this._lastDodgeTime || 0) < 5000) return;
 
     const threats = this._getNearbyHostiles(this.ctx.threatRadius);
     if (threats.length === 0) return;
 
     this._dodging = true;
+    this._lastDodgeTime = Date.now();
     // 持续更新逃跑目标 + 安全阈值检查
     this._startDodgeLoop();
   }
@@ -164,6 +166,13 @@ class CombatPassive {
   _startDodgeLoop() {
     const SAFE_RADIUS = 8;
     const { goals } = require('mineflayer-pathfinder');
+
+    // 记录逃跑开始（30 秒内不重复记录）
+    const now = Date.now();
+    if (now - (this._lastDodgeLogTime || 0) > 30000) {
+      this._lastDodgeLogTime = now;
+      this.ctx.memory?.remember('system', '[生存] 开始逃跑');
+    }
 
     this._dodgeInterval = setInterval(() => {
       if (!this._dodging) return;
@@ -188,8 +197,6 @@ class CombatPassive {
 
       this.ctx.bot.pathfinder.setGoal(new goals.GoalNearXZ(targetX, targetZ, 2));
     }, 300);
-
-    this.ctx.memory?.remember('[生存] 开始逃跑');
   }
 
   /** 停止逃跑并清理 */
@@ -200,7 +207,7 @@ class CombatPassive {
       clearInterval(this._dodgeInterval);
       this._dodgeInterval = null;
     }
-    this.ctx.memory?.remember('[生存] 逃跑结束，已脱离危险');
+    // 逃跑结束不单独记录，避免刷屏（开始逃跑时已记录）
   }
 
   async _tryRetaliate() {
@@ -232,7 +239,7 @@ class CombatPassive {
       try { this.ctx.bot.attack(target); } catch {}
     }
 
-    this.ctx.memory?.remember(`[战斗] 反击 ${target.name || '未知生物'}`);
+    this.ctx.memory?.remember('system', `[战斗] 反击 ${target.name || '未知生物'}`);
   }
 
   /** 找最近的玩家（排除 bot 自己） */

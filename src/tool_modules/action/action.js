@@ -19,9 +19,8 @@ class ActionModule {
     // 检查是否已被更高优先级的消息打断
     if (opts.abortSignal?.cancelled) return false;
 
-    // 记录对话
+    // 统计
     if (this.memory) {
-      this.memory.remember(`[对话] ${username}: ${message}`);
       this.memory.incStat('chats');
     }
 
@@ -29,10 +28,10 @@ class ActionModule {
       const result = await this.agent.handle(username, message, opts);
       if (!result) return false;
 
-      // 记录动作到记忆
+      // 记录工具结果到 facts（供自主决策参考）
       if (this.memory && result.results.length > 0) {
         for (const r of result.results) {
-          this.memory.remember(`[动作] ${r}`);
+          this.memory.remember('system', `[动作] ${r}`);
         }
         this.memory.incStat('actions', result.results.length);
       }

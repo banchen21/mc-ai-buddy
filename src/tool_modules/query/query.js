@@ -419,7 +419,10 @@ class QueryModule {
           if (hitDist < 1.0) { // 1 格碰撞半径
             const dist = eyePos.distanceTo(ePos);
             const name = e.username || e.displayName || e.name || '未知';
-            seen.set(e.id, { name, dist: Math.round(dist) });
+            const ex = Math.round(ePos.x);
+            const ey = Math.round(ePos.y);
+            const ez = Math.round(ePos.z);
+            seen.set(e.id, { name, dist: Math.round(dist), x: ex, y: ey, z: ez });
             break;
           }
         }
@@ -429,7 +432,7 @@ class QueryModule {
     if (seen.size === 0) return '视野内无实体';
 
     const sorted = [...seen.values()].sort((a, b) => a.dist - b.dist).slice(0, 10);
-    return sorted.map(e => `${e.name}(${e.dist}m)`).join(', ');
+    return sorted.map(e => `${e.name}(${e.dist}m, ${e.x},${e.y},${e.z})`).join(', ');
   }
 
   _getBlock({ x, y, z }) {
@@ -575,7 +578,7 @@ class QueryModule {
     const sortedEntities = [...entities.values()].sort((a, b) => a.dist - b.dist);
     if (sortedEntities.length > 0) {
       const entityList = sortedEntities.slice(0, 10)
-        .map(e => `${e.name}(${e.dist}m)`)
+        .map(e => `${e.name}(${e.dist}m, ${Math.round(e.pos.x)},${Math.round(e.pos.y)},${Math.round(e.pos.z)})`)
         .join(', ');
       parts.push(`[实体] ${entityList}`);
     } else {

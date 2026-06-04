@@ -18,7 +18,7 @@ class Journal {
       createdAt: '',
       updatedAt: '',
       players: {},       // { username: { firstSeen, lastSeen, notes } }
-      facts: [],         // [{ text, ts }]  重要事件/知识
+      chatHistory: [],   // [{ role, content, name?, ts }] 统一短时记忆
       locations: {},     // { name: { x, y, z, desc } }  命名坐标
       stats: {},         // { deaths, chats, ... }
     };
@@ -41,7 +41,7 @@ class Journal {
     if (fs.existsSync(this._file)) {
       try {
         this.data = JSON.parse(fs.readFileSync(this._file, 'utf-8'));
-        console.log(`[Journal] 📂 已加载日志: ${safeName} (${this.data.facts.length} 条事实)`);
+        console.log(`[Journal] 📂 已加载日志: ${safeName} (${this.data.chatHistory.length} 条对话)`);
       } catch (err) {
         console.log(`[Journal] ⚠️ 日志文件损坏，重新创建`);
         this._initFresh(safeName);
@@ -90,21 +90,28 @@ class Journal {
     this._save();
   }
 
-  // ===== 事实记录 =====
+  // ===== 短时记忆（统一 chatHistory） =====
 
-  /** 记录一条事实 */
-  remember(text) {
-    this.data.facts.push({ text, ts: new Date().toISOString() });
+  /**
+   * 记录一条系统事件到 chatHistory
+   * @param {'system'|'tool'} role
+   * @param {string} content
+   */
+  remember(role, content) {
+    this.data.chatHistory.push({ role, content, ts: new Date().toISOString() });
     // 最多保留 200 条
-    if (this.data.facts.length > 200) {
-      this.data.facts = this.data.facts.slice(-200);
+    if (this.data.chatHistory.length > 200) {
+      this.data.chatHistory = this.data.chatHistory.slice(-200);
     }
     this._save();
   }
 
-  /** 获取最近 N 条事实 */
+  /** 获取最近 N 条系统/工具记录（供自主决策上下文） */
   recentFacts(n = 10) {
-    return this.data.facts.slice(-n).map(f => f.text);
+    return this.data.chatHistory
+      .filter(m => m.role === 'system' || m.role === 'tool')
+      .slice(-n)
+      .map(m => m.content);
   }
 
   // ===== 位置记录 =====
@@ -133,23 +140,39 @@ class Journal {
     return this.data.stats[key] || 0;
   }
 
-  // ===== 对话历史持久化 =====
+  // ===== LLM 对话历史（与 chatHistory 同步） =====
 
-  /** 保存 LLM 对话历史到日志 */
+  /**
+   * 将 LLM 内存 history 同步到 chatHistory
+   * 只同步真正的 user/assistant 对话，过滤系统通知
+   */
   saveHistory(history) {
-    this.data.chatHistory = history.slice(-20).map(msg => ({
-      role: msg.role,
-      content: msg.content || '',
-      ...(msg.name ? { name: msg.name } : {}),
-      ...(msg.tool_calls ? { tool_calls: msg.tool_calls } : {}),
-      ...(msg.tool_call_id ? { tool_call_id: msg.tool_call_id } : {}),
-    }));
+    // 保留已有的 system/tool 记录，替换 user/assistant 部分
+    const sysMsgs = this.data.chatHistory.filter(m => m.role === 'system' || m.role === 'tool');
+    const chatMsgs = history
+      .filter(m => {
+        if (m.role !== 'user' && m.role !== 'assistant') return false;
+        const content = typeof m.content === 'string' ? m.content : '';
+        // 过滤系统通知
+        if (content.startsWith('[系统通知]') || content.startsWith('（已自动处理：')) return false;
+        return true;
+      })
+      .slice(-40)
+      .map(msg => ({
+        role: msg.role,
+        content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
+        ...(msg.name ? { name: msg.name } : {}),
+        ts: new Date().toISOString(),
+      }));
+    this.data.chatHistory = [...sysMsgs, ...chatMsgs].slice(-200);
     this._save();
   }
 
-  /** 恢复 LLM 对话历史 */
+  /** 恢复 LLM 对话历史（只返回 user/assistant 消息） */
   loadHistory() {
-    return this.data.chatHistory || [];
+    return this.data.chatHistory
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => ({ role: m.role, content: m.content, ...(m.name ? { name: m.name } : {}) }));
   }
 }
 

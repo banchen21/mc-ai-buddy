@@ -7,6 +7,9 @@ const path = require('path');
 const LOG_FILE = path.join(__dirname, '..', '..', 'activity.log');
 const JSONL_FILE = path.join(__dirname, '..', '..', 'activity.jsonl');
 
+let _logEnabled = true;
+let _jsonlEnabled = true;
+
 function ts() {
   return new Date().toLocaleTimeString('zh-CN', { hour12: false });
 }
@@ -22,13 +25,17 @@ const _originalError = console.error;
 console.log = function (...args) {
   const line = `[${ts()}] ${args.join(' ')}`;
   _originalLog(line);
-  try { fs.appendFileSync(LOG_FILE, line + '\n'); } catch (e) {}
+  if (_logEnabled) {
+    try { fs.appendFileSync(LOG_FILE, line + '\n'); } catch (e) {}
+  }
 };
 
 console.error = function (...args) {
   const line = `[${ts()}] ❌ ${args.join(' ')}`;
   _originalError(line);
-  try { fs.appendFileSync(LOG_FILE, line + '\n'); } catch (e) {}
+  if (_logEnabled) {
+    try { fs.appendFileSync(LOG_FILE, line + '\n'); } catch (e) {}
+  }
 };
 
 // ===== logger 对象（保留兼容旧接口） =====
@@ -53,8 +60,10 @@ const logger = {
   },
 
   _write(line, json) {
-    try { fs.appendFileSync(LOG_FILE, line + '\n'); } catch (e) {}
-    if (json) {
+    if (_logEnabled) {
+      try { fs.appendFileSync(LOG_FILE, line + '\n'); } catch (e) {}
+    }
+    if (json && _jsonlEnabled) {
       try { fs.appendFileSync(JSONL_FILE, JSON.stringify({ ts: iso(), ...json }) + '\n'); } catch (e) {}
     }
   },
@@ -115,6 +124,18 @@ const logger = {
     const s = this._state();
     this._write(`[${ts()}] 🔔 ${name}${detail ? ': ' + detail : ''}${this._stateStr()}`,
       { type: 'event', name, detail, ...s });
+  },
+
+  /** 根据 config.logging 设置日志开关 */
+  configure(cfg) {
+    if (cfg?.logging) {
+      if (typeof cfg.logging.activityLog === 'boolean') {
+        _logEnabled = cfg.logging.activityLog;
+      }
+      if (typeof cfg.logging.activityJsonl === 'boolean') {
+        _jsonlEnabled = cfg.logging.activityJsonl;
+      }
+    }
   },
 };
 

@@ -34,12 +34,34 @@ class MoveModule {
     // 自动创建默认 Movements
     const mcData = require('minecraft-data')(this.bot.version);
     this._movements = new Movements(this.bot, mcData);
+    this._movements.allowParkour = true;
+    this._movements.allowSprinting = true;
+    this._movements.canDig = true;
     return this._movements;
   }
 
   /** 确保 pathfinder 使用正确的 Movements */
   _ensureMovements() {
     this.bot.pathfinder.setMovements(this._getMovements());
+  }
+
+  /**
+   * 带超时的 pathfinder.goto，防止寻路卡死阻塞自主决策循环
+   * @param {Goal} goal
+   * @param {number} timeoutMs 超时毫秒（默认 15000）
+   */
+  async _gotoWithTimeout(goal, timeoutMs = 15000) {
+    try {
+      await Promise.race([
+        this.bot.pathfinder.goto(goal),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('移动超时')), timeoutMs)
+        ),
+      ]);
+    } catch (err) {
+      this.bot.pathfinder.setGoal(null);
+      throw err;
+    }
   }
 
   /** 检查是否与逃跑冲突，冲突时拒绝主动移动 */
@@ -187,10 +209,9 @@ class MoveModule {
     const goal = new goals.GoalNear(tx, ty, tz, 2);
 
     try {
-      await this.bot.pathfinder.goto(goal);
+      await this._gotoWithTimeout(goal);
       return `已到达 ${tx},${ty},${tz} 附近`;
     } catch (err) {
-      this.bot.pathfinder.setGoal(null);
       return `移动失败: ${err.message}`;
     }
   }
@@ -214,16 +235,15 @@ class MoveModule {
     const goal = new goals.GoalNear(p.x, p.y, p.z, range);
 
     try {
-      await this.bot.pathfinder.goto(goal);
+      await this._gotoWithTimeout(goal);
       return `已到达 ${player} 身边`;
     } catch (err) {
-      this.bot.pathfinder.setGoal(null);
       return `走向 ${player} 失败: ${err.message}`;
     }
   }
 
   /**
-   * wander — 随机探索
+   * wander — 随机探索（等待到达，避免 pathfinder goal 残留阻塞自主决策）
    */
   async _wander({ radius = 20 } = {}) {
     const conflict = this._checkDodgeConflict();
@@ -237,8 +257,14 @@ class MoveModule {
 
     this._ensureMovements();
     // GoalXZ 不关心 Y，让寻路自动处理
-    this.bot.pathfinder.setGoal(new goals.GoalXZ(tx, tz));
-    return `开始探索，目标区域 (${tx}, ~, ${tz})`;
+    const goal = new goals.GoalXZ(tx, tz);
+
+    try {
+      await this._gotoWithTimeout(goal);
+      return `已到达探索区域 (${tx}, ~, ${tz})`;
+    } catch (err) {
+      return `探索移动失败: ${err.message}`;
+    }
   }
 
   /**
@@ -294,10 +320,9 @@ class MoveModule {
     );
 
     try {
-      await this.bot.pathfinder.goto(goal);
+      await this._gotoWithTimeout(goal);
       return `已到达 ${block} (${found.position.x},${found.position.y},${found.position.z})`;
     } catch (err) {
-      this.bot.pathfinder.setGoal(null);
       return `走向 ${block} 失败: ${err.message}`;
     }
   }

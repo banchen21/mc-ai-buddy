@@ -40,7 +40,7 @@ class SurvivalPassive {
         this.ctx.bot.consume().catch(() => {});
       });
       this.ctx.injectEvent(`饥饿 (饱食度:${food})，已自动进食 ${foodItem.name}`);
-      this.ctx.memory?.remember(`[生存] 自动进食 ${foodItem.name}`);
+        this.ctx.memory?.remember('system', `[生存] 自动进食 ${foodItem.name}`);
     });
   }
 }

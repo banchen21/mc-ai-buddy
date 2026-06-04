@@ -195,9 +195,18 @@ class CraftModule {
       const dist = this.bot.entity.position.distanceTo(table.position);
       if (dist > 4) {
         this.bot.pathfinder.setMovements(this._makeMovements());
-        await this.bot.pathfinder.goto(
-          new goals.GoalNear(table.position.x, table.position.y, table.position.z, 2)
-        );
+        try {
+          await Promise.race([
+            this.bot.pathfinder.goto(
+              new goals.GoalNear(table.position.x, table.position.y, table.position.z, 2)
+            ),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('移动超时')), 15000)
+            ),
+          ]);
+        } catch {
+          // 超时或无路径，继续尝试合成（可能已经在旁边）
+        }
         this.bot.pathfinder.setGoal(null);
         table = this.bot.blockAt(table.position);
         if (!table) return '工作台不见了';

@@ -179,9 +179,18 @@ class Agent {
   /**
    * 被动模块注入事件 — 将游戏事件写入 LLM history
    * 让 LLM 在后续对话中感知到已发生的被动事件
+   * 相同事件 10 秒内不重复注入
    * @param {string} eventSummary — 事件摘要，如 "[系统] 被僵尸攻击，已自动逃跑"
    */
   injectEvent(eventSummary) {
+    // 去重：相同事件 10 秒内不重复
+    const now = Date.now();
+    if (this._lastInjectEvent === eventSummary && now - (this._lastInjectTime || 0) < 10000) {
+      return;
+    }
+    this._lastInjectEvent = eventSummary;
+    this._lastInjectTime = now;
+
     this.llm.history.push({
       role: "user",
       content: `[系统通知] ${eventSummary}`,
@@ -191,9 +200,7 @@ class Agent {
       content: `（已自动处理：${eventSummary}）`,
     });
     this.llm._trimHistory();
-    if (this.llm._onHistoryChange) {
-      this.llm._onHistoryChange(this.llm.history);
-    }
+    // 系统通知不触发 saveHistory，避免污染 chatHistory
   }
 
   /**
